@@ -1,0 +1,10 @@
+app = "crypto-signals-bot"
+primary_region = "iad"
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+
+[processes]
+  worker = "python main.py"
+
+[[services]]
