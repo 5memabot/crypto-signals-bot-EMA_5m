@@ -21,10 +21,8 @@ log = logging.getLogger(__name__)
 # إعداداتك الشخصية — غيّر هذين السطرين فقط
 # ═══════════════════════════════════════════════════
 import os
-
-TELEGRAM_TOKEN =os.environ.get("8686033782:AAERHDdnvDC6kIYBG1TqTYt8Dau7QxLDBkA")
-CHAT_ID        = os.environ.get("2143639881")
-
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID        = os.environ.get("CHAT_ID")
 # ═══════════════════════════════════════════════════
 # الإعدادات
 # ═══════════════════════════════════════════════════
