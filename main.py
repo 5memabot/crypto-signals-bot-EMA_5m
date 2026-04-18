@@ -253,9 +253,9 @@ KUCOIN_SYMBOLS = [
 
 # SYMBOL_MAP: symbol → (exchange_name, fetch_function)
 SYMBOL_MAP = {}
-for sym in BINANCE_SYMBOLS : SYMBOL_MAP[sym] = ("Binance", get_closes_binance)
+for sym in BINANCE_SYMBOLS : SYMBOL_MAP[sym] = ("KuCoin", get_closes_binance)
 for sym in MEXC_SYMBOLS     : SYMBOL_MAP[sym] = ("MEXC",    get_closes_mexc)
-for sym in BYBIT_SYMBOLS    : SYMBOL_MAP[sym] = ("Bybit",   get_closes_bybit)
+for sym in BYBIT_SYMBOLS    : SYMBOL_MAP[sym] = ("Gate",   get_closes_bybit)
 for sym in GATE_SYMBOLS     : SYMBOL_MAP[sym] = ("Gate",    get_closes_gate)
 for sym in KUCOIN_SYMBOLS   : SYMBOL_MAP[sym] = ("KuCoin",  get_closes_kucoin)
 
