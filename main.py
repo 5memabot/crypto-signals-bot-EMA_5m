@@ -267,7 +267,7 @@ def get_code_from_db(code):
         ("licenses_360", 360),
     ]
     for table, days in tables:
-        url = f"{SUPABASE_URL}/rest/v1/{table}?code=eq.{code}&limit=1"
+        url = f"{SUPABASE_URL}/rest/v1/{table}?code=eq.{code}&status=eq.free&limit=1"
         try:
             r    = requests.get(url, headers=HEADERS, timeout=5)
             data = r.json()
