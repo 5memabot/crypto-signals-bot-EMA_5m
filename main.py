@@ -364,17 +364,48 @@ def check_symbol(symbol, exchange, fetch_func):
             if closes and len(closes) >= EMA_SLOW + 2:
                 ema11, _ = calc_ema_series(closes, EMA_FAST)
                 ema26, _ = calc_ema_series(closes, EMA_SLOW)
-                # ✅ فحص صريح بـ is not None بدل if ema11
                 if ema11 is not None and ema26 is not None and ema11 < ema26:
                     with state_lock:
-                        pair   = fmt_symbol(symbol)
-                        msg_id = active_buy.get(symbol, {}).get("message_id")
-                    sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
+                        pair       = fmt_symbol(symbol)
+                        msg_id     = active_buy.get(symbol, {}).get("message_id")
+                        buy_price  = active_buy.get(symbol, {}).get("buy_price", 0)
+                        peak_price = active_buy.get(symbol, {}).get("peak_price", 0)
+                        close_price = closes[-1] if closes else 0
+
+                    if buy_price > 0 and close_price > 0:
+                        close_pct = (close_price - buy_price) / buy_price * 100
+                        peak_pct  = (peak_price  - buy_price) / buy_price * 100
+
+                        if close_pct >= 0:
+                            # ربح — يعرض ATH + CLOSE بالأخضر
+                            sell_msg = (
+                                f"<b>{pair}</b>\n"
+                                f"SELL NOW ❌\n"
+                                f"ATH: {fmt_price(peak_price)} "
+                                f"(<b><u>+{peak_pct:.1f}%</u></b>) __ "
+                                f"CLOSE: {fmt_price(close_price)} "
+                                f"(<b><u>+{close_pct:.1f}%</u></b>)"
+                            )
+                        else:
+                            # خسارة — يعرض CLOSE فقط بالأحمر
+                            sell_msg = (
+                                f"<b>{pair}</b>\n"
+                                f"SELL NOW ❌\n"
+                                f"CLOSE: {fmt_price(close_price)} "
+                                f"(<b><u>{close_pct:.1f}%</u></b>)"
+                            )
+                    else:
+                        sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
+
                     if msg_id:
                         send_message(sell_msg, reply_to=msg_id)
                     else:
                         send_message(sell_msg)
                     log.info(f"🔴 SELL: {symbol}")
+
+                    # تسجيل النتيجة للتقرير اليومي
+                    if buy_price > 0 and close_price > 0:
+                        record_sell_result(symbol, pair, buy_price, close_price)
             with state_lock:
                 pending_sell.pop(symbol, None)
                 active_buy.pop(symbol, None)
@@ -388,6 +419,12 @@ def check_symbol(symbol, exchange, fetch_func):
     # ── 4) السعر من آخر شمعة مغلقة مؤكدة ──
     # closes[-1] محذوفة مسبقاً في دوال الجلب (شمعة غير مكتملة)
     price = closes[-1]
+
+    # تحديث peak_price للعملات النشطة
+    with state_lock:
+        if symbol in active_buy:
+            if price > active_buy[symbol].get("peak_price", 0):
+                active_buy[symbol]["peak_price"] = price
 
     ema11_now, ema11_prev = calc_ema_series(closes, EMA_FAST)
     ema26_now, ema26_prev = calc_ema_series(closes, EMA_SLOW)
@@ -483,13 +520,58 @@ def check_symbol(symbol, exchange, fetch_func):
                 "buy_price"  : price,
                 "buy_time"   : now,
                 "message_id" : msg_id,
+                "peak_price" : price,   # أعلى سعر وصل إليه
             }
             cooldown[symbol] = now
             pending_buy.pop(symbol, None)
 
 # ═══════════════════════════════════════════════════
-# تشغيل بالتوازي — thread مستقل + session لكل منصة
+# تتبع الإشارات اليومية للتقرير
 # ═══════════════════════════════════════════════════
+daily_results = {}       # { symbol: {buy_price, close_price, pair} }
+daily_lock    = Lock()
+last_report   = datetime.now()
+
+def record_sell_result(symbol, pair, buy_price, close_price):
+    """يسجل نتيجة كل SELL للتقرير اليومي"""
+    with daily_lock:
+        daily_results[symbol] = {
+            "pair"        : pair,
+            "buy_price"   : buy_price,
+            "close_price" : close_price,
+            "pct"         : (close_price - buy_price) / buy_price * 100 if buy_price > 0 else 0,
+        }
+
+def send_daily_report():
+    """يرسل تقرير الـ 24 ساعة"""
+    with daily_lock:
+        if not daily_results:
+            return
+        results = dict(daily_results)
+        daily_results.clear()
+
+    wins  = {s: v for s, v in results.items() if v["pct"] >= 0}
+    loses = {s: v for s, v in results.items() if v["pct"] <  0}
+
+    msg = "💲ئەنجامێ 24 دەمژمێرن چوی یێن کوینا ل قازانج و خساربونێ دا.💱⚡👾💯💯\n\n"
+
+    if wins:
+        msg += "Win💲🚀\n\n"
+        for v in sorted(wins.values(), key=lambda x: x["pct"], reverse=True):
+            pct = v["pct"]
+            msg += f"{v['pair']} (<b><u>+{pct:.1f}%</u></b>)✅\n"
+        msg += "____________________________\n\n"
+
+    if loses:
+        msg += "LOSE 🐹💔\n\n"
+        for v in sorted(loses.values(), key=lambda x: x["pct"]):
+            pct = v["pct"]
+            msg += f"{v['pair']} (<b><u>{pct:.1f}%</u></b>)❌\n"
+
+    send_message(msg)
+    log.info("📊 تم إرسال التقرير اليومي")
+
+
 
 def run_exchange(symbols, exchange, fetch_func):
     delay = REQUEST_DELAY.get(exchange, 0.25)
@@ -566,6 +648,12 @@ def main():
         wait_for_candle_close()
         scan_all()
         cleanup_cooldown()
+
+        # تقرير يومي كل 24 ساعة
+        global last_report
+        if datetime.now() - last_report >= timedelta(hours=24):
+            send_daily_report()
+            last_report = datetime.now()
 
 
 if __name__ == "__main__":
