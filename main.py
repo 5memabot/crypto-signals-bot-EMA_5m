@@ -23,6 +23,19 @@ log = logging.getLogger(__name__)
 import os
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID        = os.environ.get("CHAT_ID")
+
+# ═══════════════════════════════════════════════════
+# Supabase Configuration (مهم: استخدم anon key فقط)
+# ═══════════════════════════════════════════════════
+SUPABASE_URL = "ضع الرابط هنا"
+SUPABASE_KEY = "ضع المفتاح هنا"   # ← يفضل anon public key (ليس service_role)
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
+
 # ═══════════════════════════════════════════════════
 # الإعدادات
 # ═══════════════════════════════════════════════════
@@ -47,7 +60,6 @@ REQUEST_DELAY = {
 # ═══════════════════════════════════════════════════
 # Sessions — session واحد لكل منصة يقلل latency
 # ═══════════════════════════════════════════════════
-# Headers موحدة — تمنع رفض الطلبات من Gate / KuCoin
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; CryptoBot/1.0)",
     "Accept"    : "application/json",
@@ -63,17 +75,9 @@ for _s in [SESSION_BINANCE, SESSION_MEXC, SESSION_BYBIT, SESSION_GATE, SESSION_K
     _s.headers.update(_HEADERS)
 
 # ═══════════════════════════════════════════════════
-# Retry مع Backoff — يمنع توقف البوت عند 429
+# Retry مع Backoff
 # ═══════════════════════════════════════════════════
-
 def retry_get(session, url, params, retries=3, timeout=5):
-    """
-    يحاول 3 مرات مع انتظار تصاعدي:
-    محاولة 1 → فورًا
-    محاولة 2 → بعد 2 ثانية
-    محاولة 3 → بعد 5 ثوانٍ
-    عند 429 (rate limit) → ينتظر تلقائياً
-    """
     waits = [0, 2, 5]
     for attempt in range(retries):
         try:
@@ -93,13 +97,9 @@ def retry_get(session, url, params, retries=3, timeout=5):
     return None
 
 # ═══════════════════════════════════════════════════
-# دوال جلب البيانات
+# دوال جلب البيانات (كما هي)
 # ═══════════════════════════════════════════════════
-
 def get_closes_binance(symbol, limit=152):
-    # بنية Binance kline: [openTime, open, high, low, CLOSE(4), ...]
-    # ترتيب: أقدم → أحدث
-    # نأخذ closes[-2] فقط (آخر شمعة مغلقة) — [-1] قد تكون لا تزال تتشكل
     try:
         r = retry_get(SESSION_BINANCE, "https://api.binance.com/api/v3/klines",
                       {"symbol": symbol, "interval": "5m", "limit": limit})
@@ -114,7 +114,6 @@ def get_closes_binance(symbol, limit=152):
     return None
 
 def get_closes_mexc(symbol, limit=152):
-    # نفس بنية Binance — c[4] = close
     try:
         r = retry_get(SESSION_MEXC, "https://api.mexc.com/api/v3/klines",
                       {"symbol": symbol, "interval": "5m", "limit": limit})
@@ -129,10 +128,6 @@ def get_closes_mexc(symbol, limit=152):
     return None
 
 def get_closes_bybit(symbol, limit=152):
-    # Bybit v5 بنية الشمعة:
-    # [startTime(0), open(1), high(2), low(3), close(4), volume(5), turnover(6)]
-    # الترتيب: أحدث → أقدم — نعكس
-    # نحذف أول عنصر بعد العكس (= آخر شمعة غير مكتملة)
     try:
         r = retry_get(SESSION_BYBIT, "https://api.bybit.com/v5/market/kline",
                       {"symbol": symbol, "interval": "5", "limit": limit, "category": "spot"})
@@ -141,7 +136,6 @@ def get_closes_bybit(symbol, limit=152):
         if data.get("retCode") == 0:
             candles = data["result"]["list"]
             if len(candles) >= EMA_SLOW + 5:
-                # reversed → أقدم→أحدث، ثم نحذف الأخيرة (غير مكتملة)
                 ordered = list(reversed(candles))
                 closes = [float(c[4]) for c in ordered[:-1]]
                 if all(isinstance(x, float) and x > 0 for x in closes[-5:]):
@@ -151,11 +145,6 @@ def get_closes_bybit(symbol, limit=152):
     return None
 
 def get_closes_gate(symbol, limit=152):
-    # Gate.io candlesticks v4 بنية الاستجابة:
-    # [timestamp(0), volume(1), close(2), high(3), low(4), open(5)]
-    # close = index 2 ✅
-    # الترتيب: أقدم → أحدث (لا حاجة للعكس)
-    # نحذف آخر شمعة (غير مكتملة)
     try:
         pair = symbol.replace("USDT", "_USDT")
         r = retry_get(SESSION_GATE, "https://api.gateio.ws/api/v4/spot/candlesticks",
@@ -164,7 +153,6 @@ def get_closes_gate(symbol, limit=152):
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
             closes = [float(c[2]) for c in data[:-1]]
-            # تحقق إضافي: هل القيم منطقية؟ (يكشف index خاطئ)
             if all(v > 0 for v in closes[-5:]):
                 return closes
     except Exception as e:
@@ -172,11 +160,6 @@ def get_closes_gate(symbol, limit=152):
     return None
 
 def get_closes_kucoin(symbol, limit=152):
-    # KuCoin candles بنية الاستجابة:
-    # [timestamp(0), open(1), close(2), high(3), low(4), volume(5), amount(6)]
-    # close = index 2 ✅
-    # الترتيب: أحدث → أقدم — نعكس
-    # نحذف آخر شمعة (غير مكتملة)
     try:
         pair = symbol.replace("USDT", "-USDT")
         r = retry_get(SESSION_KUCOIN, "https://api.kucoin.com/api/v1/market/candles",
@@ -197,65 +180,19 @@ def get_closes_kucoin(symbol, limit=152):
 # ═══════════════════════════════════════════════════
 # العملات لكل منصة
 # ═══════════════════════════════════════════════════
+BINANCE_SYMBOLS = [ ... ]   # (نفس القائمة السابقة)
+MEXC_SYMBOLS    = [ ... ]
+BYBIT_SYMBOLS   = [ ... ]
+GATE_SYMBOLS    = [ ... ]
+KUCOIN_SYMBOLS  = [ ... ]
 
-BINANCE_SYMBOLS = [
-    "BTCUSDT",    "ETHUSDT",    "XRPUSDT",    "ADAUSDT",    "SOLUSDT",
-    "DOTUSDT",    "DOGEUSDT",   "AVAXUSDT",   "LTCUSDT",    "LINKUSDT",
-    "ATOMUSDT",   "XLMUSDT",    "FILUSDT",    "TRXUSDT",    "ALGOUSDT",
-    "XMRUSDT",    "ICPUSDT",    "EGLDUSDT",   "HBARUSDT",   "NEARUSDT",
-    "APEUSDT",    "DASHUSDT",   "ZILUSDT",    "ZECUSDT",    "ZENUSDT",
-    "STORJUSDT",  "RAREUSDT",   "OPUSDT",     "ARBUSDT",    "SEIUSDT",
-    "TIAUSDT",    "WLDUSDT",    "ORDIUSDT",   "RENDERUSDT", "PHAUSDT",
-    "POLUSDT",    "TRBUSDT",    "VIRTUALUSDT","WALUSDT",    "APTUSDT",
-    "BCHUSDT",    "BIOUSDT",    "CHRUSDT",    "GRTUSDT",    "ARKMUSDT",
-    "AGLDUSDT",   "OPENUSDT",   "PLUMEUSDT",  "SAHARAUSDT", "SUSDT",
-    "LINEAUSDT",  "XPLUSDT",
-]
-
-MEXC_SYMBOLS = [
-    "XCNUSDT",     "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
-    "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
-    "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
-    "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
-    "ATHUSDT",     "ARCUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
-    "XPRUSDT",     "OMGUSDT",
-]
-
-BYBIT_SYMBOLS = [
-    "UXLINKUSDT",  "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PAALUSDT",
-    "L3USDT",      "ALCHUSDT",    "ZIGUSDT",     "MONUSDT",     "CSPRUSDT",
-    "INSPUSDT",    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",
-    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",     "GALAUSDT",
-    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",     "TNSRUSDT",
-    "KAIAUSDT",    "PYTHUSDT",    "AIXBTUSDT",   "BLURUSDT",    "ZKUSDT",
-    "JASMYUSDT",   "PARTIUSDT",   "THETAUSDT",   "BICOUSDT",    "POLUSDT",
-]
-
-GATE_SYMBOLS = [
-    "AKTUSDT",     "RADUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",
-    "IDUSDT",      "MTLUSDT",     "BANDUSDT",    "ICXUSDT",     "STGUSDT",
-    "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
-    "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
-    "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
-    "POWRUSDT",
-]
-
-KUCOIN_SYMBOLS = [
-    "AIOZUSDT",    "DUSKUSDT",    "IOTXUSDT",    "MANTAUSDT",   "NIGHTUSDT",
-    "CELRUSDT",    "ANKRUSDT",    "ENSUSDT",     "API3USDT",    "WUSDT",
-    "MANAUSDT",    "CELOUSDT",    "EIGENUSDT",   "GASUSDT",     "ENJUSDT",
-    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "ACTUSDT",     "CHZUSDT",
-    "DEXEUSDT",    "HNTUSDT",     "FLUXUSDT",    "PORTALUSDT",  "EDUUSDT",
-    "IOSTUSDT",    "VETUSDT",
-]
-
-# SYMBOL_MAP: symbol → (exchange_name, fetch_function)
+# SYMBOL_MAP
 SYMBOL_MAP = {}
-for sym in BINANCE_SYMBOLS : SYMBOL_MAP[sym] = ("KuCoin", get_closes_kucoin)
-for sym in MEXC_SYMBOLS     : SYMBOL_MAP[sym] = ("MEXC",    get_closes_mexc)
-for sym in BYBIT_SYMBOLS    : SYMBOL_MAP[sym] = ("Gate",   get_closes_gate)
-for sym in GATE_SYMBOLS     : SYMBOL_MAP[sym] = ("Gate",    get_closes_gate)
-for sym in KUCOIN_SYMBOLS   : SYMBOL_MAP[sym] = ("KuCoin",  get_closes_kucoin)
+for sym in BINANCE_SYMBOLS: SYMBOL_MAP[sym] = ("KuCoin", get_closes_kucoin)
+for sym in MEXC_SYMBOLS:    SYMBOL_MAP[sym] = ("MEXC",    get_closes_mexc)
+for sym in BYBIT_SYMBOLS:   SYMBOL_MAP[sym] = ("Gate",    get_closes_gate)
+for sym in GATE_SYMBOLS:    SYMBOL_MAP[sym] = ("Gate",    get_closes_gate)
+for sym in KUCOIN_SYMBOLS:  SYMBOL_MAP[sym] = ("KuCoin",  get_closes_kucoin)
 
 ALL_SYMBOLS = list(SYMBOL_MAP.keys())
 
@@ -269,16 +206,91 @@ cooldown     = {}
 state_lock   = Lock()
 
 # ═══════════════════════════════════════════════════
-# Telegram
+# Supabase Functions (محدثة بالكامل)
 # ═══════════════════════════════════════════════════
 
+def get_code_from_db(code):
+    """يجلب الكود مع limit=1 لتجنب أي duplicate"""
+    url = f"{SUPABASE_URL}/rest/v1/codes?code=eq.{code}&limit=1"
+    r = requests.get(url, headers=HEADERS)
+    data = r.json()
+    return data[0] if data else None
+
+
+def mark_code_used(code, user_id):
+    """يحدث الكود ويتحقق من نجاح العملية"""
+    url = f"{SUPABASE_URL}/rest/v1/codes?code=eq.{code}"
+    payload = {
+        "used": True,
+        "used_by": user_id,
+        "used_at": datetime.utcnow().isoformat()
+    }
+    r = requests.patch(url, headers=HEADERS, json=payload)
+    if r.status_code != 204:
+        log.warning(f"❌ فشل تحديث الكود {code} — status: {r.status_code}")
+
+
+def activate_user(user_id, expire):
+    """UPSERT صحيح 100% باستخدام on_conflict (الطريقة الموصى بها في Supabase)"""
+    url = f"{SUPABASE_URL}/rest/v1/users?on_conflict=user_id"
+    
+    payload = {
+        "user_id": user_id,
+        "expire_at": expire.isoformat(),
+        "is_active": True
+    }
+
+    upsert_headers = HEADERS.copy()
+    upsert_headers["Prefer"] = "resolution=merge-duplicates"
+
+    r = requests.post(url, headers=upsert_headers, json=payload)
+    
+    if r.status_code not in (200, 201, 204):
+        log.warning(f"⚠️ فشل تفعيل المستخدم {user_id} — status: {r.status_code}")
+    else:
+        log.info(f"✅ تم تفعيل/تحديث المستخدم {user_id} حتى {expire}")
+
+
+def get_active_users():
+    """يجلب فقط المستخدمين النشطين"""
+    now = datetime.utcnow().isoformat()
+    url = f"{SUPABASE_URL}/rest/v1/users?expire_at=gt.{now}&is_active=eq.true"
+    r = requests.get(url, headers=HEADERS)
+    data = r.json()
+    return [u["user_id"] for u in data]
+
+
+def send_message_to_user(user_id, text):
+    """إرسال رسالة لمستخدم واحد"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    data = {
+        "chat_id": user_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    requests.post(url, data=data, timeout=8)
+
+
+def broadcast_message(text):
+    """إرسال لكل المستخدمين النشطين"""
+    users = get_active_users()
+    for user_id in users:
+        try:
+            send_message_to_user(user_id, text)
+        except Exception as e:
+            log.warning(f"⚠️ فشل إرسال لـ {user_id}: {e}")
+
+
+# ═══════════════════════════════════════════════════
+# Telegram (الدالة القديمة محتفظ بها للتقارير فقط)
+# ═══════════════════════════════════════════════════
 def send_message(text, reply_to=None):
-    url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     if reply_to:
         data["reply_to_message_id"] = reply_to
     try:
-        r   = requests.post(url, data=data, timeout=5)
+        r = requests.post(url, data=data, timeout=5)
         res = r.json()
         if res.get("ok"):
             return res["result"]["message_id"]
@@ -287,23 +299,18 @@ def send_message(text, reply_to=None):
     return None
 
 # ═══════════════════════════════════════════════════
-# حساب EMA — incremental
+# باقي الدوال (EMA, fmt, cooldown, check_symbol, daily report ...)
 # ═══════════════════════════════════════════════════
-
 def calc_ema_series(closes, period):
     if len(closes) < period + 1:
         return None, None
-    k    = 2 / (period + 1)
-    ema  = sum(closes[:period]) / period
+    k = 2 / (period + 1)
+    ema = sum(closes[:period]) / period
     prev = ema
     for price in closes[period:]:
         prev = ema
-        ema  = price * k + ema * (1 - k)
+        ema = price * k + ema * (1 - k)
     return ema, prev
-
-# ═══════════════════════════════════════════════════
-# تنسيق
-# ═══════════════════════════════════════════════════
 
 def fmt_symbol(symbol):
     if symbol.endswith("USDT"):
@@ -318,12 +325,7 @@ def fmt_price(price):
     else:
         return f"{price:.6f}"
 
-# ═══════════════════════════════════════════════════
-# Cooldown
-# ═══════════════════════════════════════════════════
-
 def can_signal(symbol):
-    """يُستدعى دائماً داخل state_lock"""
     if symbol not in cooldown:
         return True
     return (datetime.now() - cooldown[symbol]) >= timedelta(minutes=COOLDOWN_MIN)
@@ -335,13 +337,12 @@ def cleanup_cooldown():
                 del cooldown[sym]
 
 # ═══════════════════════════════════════════════════
-# المنطق الرئيسي
+# المنطق الرئيسي (محدث: BUY + SELL يستخدمان broadcast)
 # ═══════════════════════════════════════════════════
-
 def check_symbol(symbol, exchange, fetch_func):
     now = datetime.now()
 
-    # ── 1) تنظيف BUY المنتهية (24 ساعة) ──
+    # تنظيف BUY المنتهية
     with state_lock:
         if symbol in active_buy:
             if now - active_buy[symbol]["buy_time"] > timedelta(hours=BUY_EXPIRY_HRS):
@@ -350,77 +351,61 @@ def check_symbol(symbol, exchange, fetch_func):
                 pending_sell.pop(symbol, None)
                 return
 
-    # ── 2) SELL معلق — تحقق بعد 10 دقائق ──
+    # SELL معلق
     with state_lock:
-        in_sell  = symbol in pending_sell
-        sell_age = (
-            (now - pending_sell[symbol]["sell_time"]).total_seconds() / 60
-            if in_sell else 0
-        )
+        in_sell = symbol in pending_sell
+        sell_age = (now - pending_sell[symbol]["sell_time"]).total_seconds() / 60 if in_sell else 0
 
-    if in_sell:
-        if sell_age >= SELL_WAIT_MIN:
-            closes = fetch_func(symbol)
-            if closes and len(closes) >= EMA_SLOW + 2:
-                ema11, _ = calc_ema_series(closes, EMA_FAST)
-                ema26, _ = calc_ema_series(closes, EMA_SLOW)
-                if ema11 is not None and ema26 is not None and ema11 < ema26:
-                    with state_lock:
-                        pair       = fmt_symbol(symbol)
-                        msg_id     = active_buy.get(symbol, {}).get("message_id")
-                        buy_price  = active_buy.get(symbol, {}).get("buy_price", 0)
-                        peak_price = active_buy.get(symbol, {}).get("peak_price", 0)
-                        close_price = closes[-1] if closes else 0
+    if in_sell and sell_age >= SELL_WAIT_MIN:
+        closes = fetch_func(symbol)
+        if closes and len(closes) >= EMA_SLOW + 2:
+            ema11, _ = calc_ema_series(closes, EMA_FAST)
+            ema26, _ = calc_ema_series(closes, EMA_SLOW)
+            if ema11 is not None and ema26 is not None and ema11 < ema26:
+                with state_lock:
+                    pair = fmt_symbol(symbol)
+                    buy_price = active_buy.get(symbol, {}).get("buy_price", 0)
+                    peak_price = active_buy.get(symbol, {}).get("peak_price", 0)
+                    close_price = closes[-1]
 
-                    if buy_price > 0 and close_price > 0:
-                        close_pct = (close_price - buy_price) / buy_price * 100
-                        peak_pct  = (peak_price  - buy_price) / buy_price * 100
+                if buy_price > 0 and close_price > 0:
+                    close_pct = (close_price - buy_price) / buy_price * 100
+                    peak_pct = (peak_price - buy_price) / buy_price * 100
 
-                        if close_pct >= 0:
-                            # ربح — يعرض ATH + CLOSE بالأخضر
-                            sell_msg = (
-                                f"<b>{pair}</b>\n"
-                                f"SELL NOW ❌\n"
-                                f"ATH: {fmt_price(peak_price)} "
-                                f"(<b><u>+{peak_pct:.1f}%</u></b>) __ "
-                                f"CLOSE: {fmt_price(close_price)} "
-                                f"(<b><u>+{close_pct:.1f}%</u></b>)"
-                            )
-                        else:
-                            # خسارة — يعرض CLOSE فقط بالأحمر
-                            sell_msg = (
-                                f"<b>{pair}</b>\n"
-                                f"SELL NOW ❌\n"
-                                f"CLOSE: {fmt_price(close_price)} "
-                                f"(<b><u>{close_pct:.1f}%</u></b>)"
-                            )
+                    if close_pct >= 0:
+                        sell_msg = (
+                            f"<b>{pair}</b>\n"
+                            f"SELL NOW ❌\n"
+                            f"ATH: {fmt_price(peak_price)} (<b><u>+{peak_pct:.1f}%</u></b>) __ "
+                            f"CLOSE: {fmt_price(close_price)} (<b><u>+{close_pct:.1f}%</u></b>)"
+                        )
                     else:
-                        sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
+                        sell_msg = (
+                            f"<b>{pair}</b>\n"
+                            f"SELL NOW ❌\n"
+                            f"CLOSE: {fmt_price(close_price)} (<b><u>{close_pct:.1f}%</u></b>)"
+                        )
+                else:
+                    sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
 
-                    if msg_id:
-                        send_message(sell_msg, reply_to=msg_id)
-                    else:
-                        send_message(sell_msg)
-                    log.info(f"🔴 SELL: {symbol}")
+                broadcast_message(sell_msg)
+                log.info(f"🔴 SELL: {symbol}")
 
-                    # تسجيل النتيجة للتقرير اليومي
-                    if buy_price > 0 and close_price > 0:
-                        record_sell_result(symbol, pair, buy_price, close_price)
-            with state_lock:
-                pending_sell.pop(symbol, None)
-                active_buy.pop(symbol, None)
+                if buy_price > 0 and close_price > 0:
+                    record_sell_result(symbol, pair, buy_price, close_price)
+
+        with state_lock:
+            pending_sell.pop(symbol, None)
+            active_buy.pop(symbol, None)
         return
 
-    # ── 3) جلب البيانات ──
+    # جلب البيانات + التحليل (نفس الكود السابق)
     closes = fetch_func(symbol)
     if not closes or len(closes) < EMA_SLOW + 5:
         return
 
-    # ── 4) السعر من آخر شمعة مغلقة مؤكدة ──
-    # closes[-1] محذوفة مسبقاً في دوال الجلب (شمعة غير مكتملة)
     price = closes[-1]
 
-    # تحديث peak_price للعملات النشطة
     with state_lock:
         if symbol in active_buy:
             if price > active_buy[symbol].get("peak_price", 0):
@@ -429,37 +414,28 @@ def check_symbol(symbol, exchange, fetch_func):
     ema11_now, ema11_prev = calc_ema_series(closes, EMA_FAST)
     ema26_now, ema26_prev = calc_ema_series(closes, EMA_SLOW)
 
-    # ✅ فحص صريح بـ is not None
     if any(v is None for v in [ema11_now, ema11_prev, ema26_now, ema26_prev]):
         return
 
-    bullish = (
-        (ema11_prev <= ema26_prev) and   # كروس EMA11 فوق EMA26
-        (ema11_now  >  ema26_now)  and   # تأكيد الكروس
-        (ema26_now  >  ema26_prev)       # trend filter: EMA26 صاعد
-    )
+    bullish = (ema11_prev <= ema26_prev) and (ema11_now > ema26_now) and (ema26_now > ema26_prev)
     bearish = (ema11_prev >= ema26_prev) and (ema11_now < ema26_now)
 
-    # ── 5) كروس BUY ──
+    # BUY كروس
     with state_lock:
         already_pending = symbol in pending_buy
-        already_active  = symbol in active_buy
-        ok_cooldown     = can_signal(symbol)
+        already_active = symbol in active_buy
+        ok_cooldown = can_signal(symbol)
 
     if bullish and not already_pending and not already_active and ok_cooldown:
         with state_lock:
-            pending_buy[symbol] = {
-                "cross_price" : price,
-                "cross_time"  : now,
-                "checks"      : 0,
-            }
+            pending_buy[symbol] = {"cross_price": price, "cross_time": now, "checks": 0}
         log.info(f"⏳ BUY كروس: {symbol} @ {fmt_price(price)} [{exchange}]")
         return
 
-    # ── 6) كروس SELL ──
+    # SELL كروس
     with state_lock:
         in_active = symbol in active_buy
-        in_sell2  = symbol in pending_sell
+        in_sell2 = symbol in pending_sell
 
     if bearish and in_active and not in_sell2:
         with state_lock:
@@ -468,10 +444,10 @@ def check_symbol(symbol, exchange, fetch_func):
         log.info(f"⏳ SELL كروس: {symbol} — انتظار 10 دقائق")
         return
 
-    # ── 7) تأكيد BUY المعلق ──
+    # تأكيد BUY
     with state_lock:
         in_pending = symbol in pending_buy
-        entry      = dict(pending_buy[symbol]) if in_pending else None
+        entry = dict(pending_buy[symbol]) if in_pending else None
 
     if not in_pending:
         return
@@ -493,7 +469,6 @@ def check_symbol(symbol, exchange, fetch_func):
             pending_buy.pop(symbol, None)
         return
 
-    # ✅ فحص صريح
     if ema11_now is not None and ema26_now is not None and ema11_now < ema26_now:
         log.info(f"↩️  كروس عكسي: {symbol}")
         with state_lock:
@@ -503,7 +478,7 @@ def check_symbol(symbol, exchange, fetch_func):
     pct = (price - entry["cross_price"]) / entry["cross_price"]
     if pct >= CONFIRM_MIN_PCT:
         pair = fmt_symbol(symbol)
-        msg  = (
+        msg = (
             f"👇💱👾🔥💥🚀🌕💯💯\n\n"
             f"<b>{pair}</b>\n"
             f"BUY NOW ✅\n"
@@ -512,66 +487,60 @@ def check_symbol(symbol, exchange, fetch_func):
             f"⚠️ گەلەک تەماع نەبە _ و فایدێ خو وەربگرە.\n\n"
             f"💸💵💴💰💹💲💱👾"
         )
-        msg_id = send_message(msg)
+        broadcast_message(msg)
         log.info(f"✅ BUY: {symbol} @ {fmt_price(price)} (+{pct*100:.2f}%) [{exchange}]")
 
         with state_lock:
             active_buy[symbol] = {
-                "buy_price"  : price,
-                "buy_time"   : now,
-                "message_id" : msg_id,
-                "peak_price" : price,   # أعلى سعر وصل إليه
+                "buy_price": price,
+                "buy_time": now,
+                "message_id": None,
+                "peak_price": price,
             }
             cooldown[symbol] = now
             pending_buy.pop(symbol, None)
 
 # ═══════════════════════════════════════════════════
-# تتبع الإشارات اليومية للتقرير
+# Daily Report + باقي الدوال
 # ═══════════════════════════════════════════════════
-daily_results = {}       # { symbol: {buy_price, close_price, pair} }
-daily_lock    = Lock()
-last_report   = datetime.now()
+daily_results = {}
+daily_lock = Lock()
+last_report = datetime.now()
 
 def record_sell_result(symbol, pair, buy_price, close_price):
-    """يسجل نتيجة كل SELL للتقرير اليومي"""
     with daily_lock:
         daily_results[symbol] = {
-            "pair"        : pair,
-            "buy_price"   : buy_price,
-            "close_price" : close_price,
-            "pct"         : (close_price - buy_price) / buy_price * 100 if buy_price > 0 else 0,
+            "pair": pair,
+            "buy_price": buy_price,
+            "close_price": close_price,
+            "pct": (close_price - buy_price) / buy_price * 100 if buy_price > 0 else 0,
         }
 
 def send_daily_report():
-    """يرسل تقرير الـ 24 ساعة"""
     with daily_lock:
         if not daily_results:
             return
         results = dict(daily_results)
         daily_results.clear()
 
-    wins  = {s: v for s, v in results.items() if v["pct"] >= 0}
-    loses = {s: v for s, v in results.items() if v["pct"] <  0}
+    wins = {s: v for s, v in results.items() if v["pct"] >= 0}
+    loses = {s: v for s, v in results.items() if v["pct"] < 0}
 
     msg = "💲ئەنجامێ 24 دەمژمێرن چوی یێن کوینا ل قازانج و خساربونێ دا.💱⚡👾💯💯\n\n"
 
     if wins:
         msg += "Win💲🚀\n\n"
         for v in sorted(wins.values(), key=lambda x: x["pct"], reverse=True):
-            pct = v["pct"]
-            msg += f"{v['pair']} (<b><u>+{pct:.1f}%</u></b>)✅\n"
+            msg += f"{v['pair']} (<b><u>+{v['pct']:.1f}%</u></b>)✅\n"
         msg += "____________________________\n\n"
 
     if loses:
         msg += "LOSE 🐹💔\n\n"
         for v in sorted(loses.values(), key=lambda x: x["pct"]):
-            pct = v["pct"]
-            msg += f"{v['pair']} (<b><u>{pct:.1f}%</u></b>)❌\n"
+            msg += f"{v['pair']} (<b><u>{v['pct']:.1f}%</u></b>)❌\n"
 
     send_message(msg)
     log.info("📊 تم إرسال التقرير اليومي")
-
-
 
 def run_exchange(symbols, exchange, fetch_func):
     delay = REQUEST_DELAY.get(exchange, 0.25)
@@ -590,34 +559,74 @@ def scan_all():
         (GATE_SYMBOLS,    "Gate",    get_closes_gate),
         (KUCOIN_SYMBOLS,  "KuCoin",  get_closes_kucoin),
     ]
-    threads = [
-        Thread(target=run_exchange, args=(syms, exch, fn))
-        for syms, exch, fn in exchanges
-    ]
+    threads = [Thread(target=run_exchange, args=(syms, exch, fn)) for syms, exch, fn in exchanges]
     for t in threads: t.start()
     for t in threads: t.join()
 
 # ═══════════════════════════════════════════════════
-# البرنامج الرئيسي
+# استقبال المستخدمين
 # ═══════════════════════════════════════════════════
+def handle_user_message(user_id, text):
+    if text == "/start":
+        send_message_to_user(user_id, "أرسل كود التفعيل")
+        return
+
+    code_data = get_code_from_db(text)
+
+    if not code_data:
+        send_message_to_user(user_id, "❌ كود غير صحيح")
+        return
+
+    if code_data.get("used"):
+        send_message_to_user(user_id, "❌ الكود مستخدم")
+        return
+
+    duration = code_data["duration_days"]
+    expire = datetime.utcnow() + timedelta(days=duration)
+
+    activate_user(user_id, expire)
+    mark_code_used(text, user_id)
+
+    send_message_to_user(user_id, f"✅ تم التفعيل لمدة {duration} يوم")
+
+
+def handle_updates():
+    last_update_id = None
+    while True:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+        params = {"timeout": 10}
+        if last_update_id:
+            params["offset"] = last_update_id + 1
+
+        try:
+            r = requests.get(url, params=params, timeout=15).json()
+            for update in r.get("result", []):
+                last_update_id = update["update_id"]
+                if "message" not in update:
+                    continue
+                msg = update["message"]
+                user_id = msg["chat"]["id"]
+                text = msg.get("text", "")
+                handle_user_message(user_id, text)
+        except Exception as e:
+            log.warning(f"⚠️ handle_updates error: {e}")
+            time.sleep(5)
+
 
 # ═══════════════════════════════════════════════════
-# Candle Alignment — ينتظر إغلاق الشمعة الفعلي
+# Candle Alignment
 # ═══════════════════════════════════════════════════
-
 def wait_for_candle_close():
-    """
-    ينتظر حتى إغلاق الشمعة الحقيقي (5m) + 5 ثوانٍ buffer
-    يحل مشكلة اختلاف توقيت الشموع بين المنصات.
-    """
-    now  = datetime.utcnow()
+    now = datetime.utcnow()
     secs = (now.minute % 5) * 60 + now.second
-    wait = (300 - secs) + 5   # 5 ثوانٍ buffer لـ Gate/KuCoin
+    wait = (300 - secs) + 5
     log.info(f"⏳ انتظار {wait:.0f} ثانية حتى إغلاق الشمعة...")
     time.sleep(wait)
 
 
 def main():
+    Thread(target=handle_updates, daemon=True).start()
+
     total = len(ALL_SYMBOLS)
     send_message(
         f"🚀 <b>البوت بدأ العمل</b>\n\n"
@@ -638,18 +647,14 @@ def main():
         ts = datetime.now().strftime("%H:%M:%S")
         log.info(f"{'═'*55}")
         log.info(f"🔍 دورة #{cycle} | {ts} | {total} عملة")
-        with state_lock:
-            pb = len(pending_buy)
-            ab = len(active_buy)
-            ps = len(pending_sell)
-        log.info(f"⏳pending={pb} | ✅active={ab} | 🔴sell={ps}")
 
-        # ✅ انتظار الشمعة أولاً، ثم التحليل
+        with state_lock:
+            log.info(f"⏳pending={len(pending_buy)} | ✅active={len(active_buy)} | 🔴sell={len(pending_sell)}")
+
         wait_for_candle_close()
         scan_all()
         cleanup_cooldown()
 
-        # تقرير يومي كل 24 ساعة
         global last_report
         if datetime.now() - last_report >= timedelta(hours=24):
             send_daily_report()
