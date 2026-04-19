@@ -28,8 +28,8 @@ CHAT_ID        = os.environ.get("CHAT_ID")
 # ═══════════════════════════════════════════════════
 EMA_FAST        = 11      # EMA السريع
 EMA_SLOW        = 26      # EMA البطيء
-CONFIRM_MIN_PCT = 0.002   # 0.2% ارتفاع مطلوب للتأكيد
-WAIT_CANDLES    = 2       # انتظار شمعتين (10 دقائق) قبل التأكيد
+CONFIRM_MIN_PCT = 0.001   # 0.1% ارتفاع مطلوب للتأكيد
+WAIT_CANDLES    = 1       # انتظار شمعتين (5 دقائق) قبل التأكيد
 MAX_CHECKS      = 30      # أقصى محاولات تأكيد = 150 دقيقة
 SELL_WAIT_MIN   = 10      # انتظار دقائق قبل SELL
 BUY_EXPIRY_HRS  = 24      # حذف BUY بعد 24 ساعة
