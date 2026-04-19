@@ -43,7 +43,7 @@ EMA_SLOW        = 26      # EMA البطيء
 CONFIRM_MIN_PCT = 0.001   # 0.1% ارتفاع مطلوب للتأكيد
 WAIT_CANDLES    = 1       # انتظار شمعتين (5 دقائق) قبل التأكيد
 MAX_CHECKS      = 30      # أقصى محاولات تأكيد = 150 دقيقة
-SELL_WAIT_MIN   = 10      # انتظار دقائق قبل SELL
+SELL_WAIT_MIN   = 5      # انتظار دقائق قبل SELL
 BUY_EXPIRY_HRS  = 24      # حذف BUY بعد 24 ساعة
 COOLDOWN_MIN    = 30      # cooldown بعد كل إشارة BUY
 
@@ -255,24 +255,43 @@ state_lock   = Lock()
 # ═══════════════════════════════════════════════════
 
 def get_code_from_db(code):
-    """يجلب الكود مع limit=1 لتجنب أي duplicate"""
-    url = f"{SUPABASE_URL}/rest/v1/codes?code=eq.{code}&limit=1"
-    r = requests.get(url, headers=HEADERS)
-    data = r.json()
-    return data[0] if data else None
+    """
+    يبحث في الجداول الأربعة بالترتيب:
+    licenses_30 → licenses_90 → licenses_180 → licenses_360
+    يرجع بيانات الكود مع مدته إذا وجد
+    """
+    tables = [
+        ("licenses_30",  30),
+        ("licenses_90",  90),
+        ("licenses_180", 180),
+        ("licenses_360", 360),
+    ]
+    for table, days in tables:
+        url = f"{SUPABASE_URL}/rest/v1/{table}?code=eq.{code}&limit=1"
+        try:
+            r    = requests.get(url, headers=HEADERS, timeout=5)
+            data = r.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                row = data[0]
+                row["duration_days"] = days   # أضف المدة تلقائياً
+                row["_table"]        = table  # احفظ اسم الجدول للتحديث لاحقاً
+                return row
+        except Exception as e:
+            log.warning(f"⚠️ خطأ في البحث بـ {table}: {e}")
+    return None
 
 
-def mark_code_used(code, user_id):
-    """يحدث الكود ويتحقق من نجاح العملية"""
-    url = f"{SUPABASE_URL}/rest/v1/codes?code=eq.{code}"
+def mark_code_used(code, user_id, table="licenses_30"):
+    """يحدث الكود في جدوله الأصلي"""
+    url = f"{SUPABASE_URL}/rest/v1/{table}?code=eq.{code}"
     payload = {
-        "used": True,
-        "used_by": user_id,
-        "used_at": datetime.utcnow().isoformat()
+        "status"  : "used",
+        "used_by" : user_id,
+        "used_at" : datetime.utcnow().isoformat()
     }
     r = requests.patch(url, headers=HEADERS, json=payload)
     if r.status_code != 204:
-        log.warning(f"❌ فشل تحديث الكود {code} — status: {r.status_code}")
+        log.warning(f"❌ فشل تحديث الكود {code} في {table} — status: {r.status_code}")
 
 
 def activate_user(user_id, expire):
@@ -627,10 +646,11 @@ def handle_user_message(user_id, text):
         return
 
     duration = code_data["duration_days"]
-    expire = datetime.utcnow() + timedelta(days=duration)
+    table    = code_data.get("_table", "licenses_30")
+    expire   = datetime.utcnow() + timedelta(days=duration)
 
     activate_user(user_id, expire)
-    mark_code_used(text, user_id)
+    mark_code_used(text, user_id, table)
 
     send_message_to_user(user_id, f"✅ تم التفعيل لمدة {duration} يوم")
 
