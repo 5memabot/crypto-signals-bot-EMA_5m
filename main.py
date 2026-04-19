@@ -27,9 +27,8 @@ CHAT_ID        = os.environ.get("CHAT_ID")
 # ═══════════════════════════════════════════════════
 # Supabase Configuration (مهم: استخدم anon key فقط)
 # ═══════════════════════════════════════════════════
-SUPABASE_URL = "ضع الرابط هنا"
-SUPABASE_KEY = "ضع المفتاح هنا"   # ← يفضل anon public key (ليس service_role)
-
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -180,11 +179,57 @@ def get_closes_kucoin(symbol, limit=152):
 # ═══════════════════════════════════════════════════
 # العملات لكل منصة
 # ═══════════════════════════════════════════════════
-BINANCE_SYMBOLS = [ ... ]   # (نفس القائمة السابقة)
-MEXC_SYMBOLS    = [ ... ]
-BYBIT_SYMBOLS   = [ ... ]
-GATE_SYMBOLS    = [ ... ]
-KUCOIN_SYMBOLS  = [ ... ]
+
+BINANCE_SYMBOLS = [
+    "BTCUSDT",    "ETHUSDT",    "XRPUSDT",    "ADAUSDT",    "SOLUSDT",
+    "DOTUSDT",    "DOGEUSDT",   "AVAXUSDT",   "LTCUSDT",    "LINKUSDT",
+    "ATOMUSDT",   "XLMUSDT",    "FILUSDT",    "TRXUSDT",    "ALGOUSDT",
+    "XMRUSDT",    "ICPUSDT",    "EGLDUSDT",   "HBARUSDT",   "NEARUSDT",
+    "APEUSDT",    "DASHUSDT",   "ZILUSDT",    "ZECUSDT",    "ZENUSDT",
+    "STORJUSDT",  "RAREUSDT",   "OPUSDT",     "ARBUSDT",    "SEIUSDT",
+    "TIAUSDT",    "WLDUSDT",    "ORDIUSDT",   "RENDERUSDT", "PHAUSDT",
+    "POLUSDT",    "TRBUSDT",    "VIRTUALUSDT","WALUSDT",    "APTUSDT",
+    "BCHUSDT",    "BIOUSDT",    "CHRUSDT",    "GRTUSDT",    "ARKMUSDT",
+    "AGLDUSDT",   "OPENUSDT",   "PLUMEUSDT",  "SAHARAUSDT", "SUSDT",
+    "LINEAUSDT",  "XPLUSDT",
+]
+
+MEXC_SYMBOLS = [
+    "XCNUSDT",     "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
+    "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
+    "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
+    "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
+    "ATHUSDT",     "ARCUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
+    "XPRUSDT",     "OMGUSDT",
+]
+
+BYBIT_SYMBOLS = [
+    "UXLINKUSDT",  "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PAALUSDT",
+    "L3USDT",      "ALCHUSDT",    "ZIGUSDT",     "MONUSDT",     "CSPRUSDT",
+    "INSPUSDT",    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",
+    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",     "GALAUSDT",
+    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",     "TNSRUSDT",
+    "KAIAUSDT",    "PYTHUSDT",    "AIXBTUSDT",   "BLURUSDT",    "ZKUSDT",
+    "JASMYUSDT",   "PARTIUSDT",   "THETAUSDT",   "BICOUSDT",    "POLUSDT",
+]
+
+GATE_SYMBOLS = [
+    "AKTUSDT",     "RADUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",
+    "IDUSDT",      "MTLUSDT",     "BANDUSDT",    "ICXUSDT",     "STGUSDT",
+    "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
+    "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
+    "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
+    "POWRUSDT",
+]
+
+KUCOIN_SYMBOLS = [
+    "AIOZUSDT",    "DUSKUSDT",    "IOTXUSDT",    "MANTAUSDT",   "NIGHTUSDT",
+    "CELRUSDT",    "ANKRUSDT",    "ENSUSDT",     "API3USDT",    "WUSDT",
+    "MANAUSDT",    "CELOUSDT",    "EIGENUSDT",   "GASUSDT",     "ENJUSDT",
+    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "ACTUSDT",     "CHZUSDT",
+    "DEXEUSDT",    "HNTUSDT",     "FLUXUSDT",    "PORTALUSDT",  "EDUUSDT",
+    "IOSTUSDT",    "VETUSDT",
+]
 
 # SYMBOL_MAP
 SYMBOL_MAP = {}
