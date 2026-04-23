@@ -173,8 +173,8 @@ MEXC_SYMBOLS = [
     "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
     "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
     "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
-    "ATHUSDT",     "ARCUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
-    "XPRUSDT",     "OMGUSDT",
+    "ATHUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",     "XPRUSDT",
+    "OMGUSDT",
 ]
 
 BYBIT_SYMBOLS = [
@@ -202,7 +202,7 @@ KUCOIN_SYMBOLS = [
     "MANAUSDT",    "CELOUSDT",    "EIGENUSDT",   "GASUSDT",     "ENJUSDT",
     "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "ACTUSDT",     "CHZUSDT",
     "DEXEUSDT",    "HNTUSDT",     "FLUXUSDT",    "PORTALUSDT",  "EDUUSDT",
-    "IOSTUSDT",    "VETUSDT",
+    "IOSTUSDT",    "VETUSDT",     "ARCUSDT",
 ]
 
 SYMBOL_MAP = {}
