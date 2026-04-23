@@ -173,7 +173,7 @@ MEXC_SYMBOLS = [
     "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
     "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
     "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
-    "ATHUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
+    "ATHUSDT",     "ARCUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
     "XPRUSDT",     "OMGUSDT",
 ]
 
@@ -193,7 +193,7 @@ GATE_SYMBOLS = [
     "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
     "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
     "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
-    "POWRUSDT",    "ARCUSDT",
+    "POWRUSDT",    
 ]
 
 KUCOIN_SYMBOLS = [
