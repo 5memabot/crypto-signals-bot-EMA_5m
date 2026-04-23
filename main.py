@@ -436,6 +436,9 @@ def send_daily_report():
     msg += '❤️👾 Instagram 👉 <a href="https://www.instagram.com/azad__x__?igsh=MXgzdnZnMGo2NmZncA==">Azad_Bashqali</a>\n'
     msg += '👾❤️ TikTok 👉 <a href="https://www.tiktok.com/@azad_x__?_r=1&_t=ZS-95lY9xVauEX">Azad_X</a>\n'
     msg += "🔥👾 Telegram 👉 @Azad_X_01"
+    msg += " By Guardex Quant LABs "
+    msg += "🔥The Founder : Azad Smaeel Abdullah"
+
 
     # إرسال مع تثبيت للـ admin + broadcast للمستخدمين
     send_message(msg, pin=True)
@@ -707,7 +710,7 @@ def main():
         f"🟣 Bybit:   {len(BYBIT_SYMBOLS)}\n"
         f"🔵 Gate:    {len(GATE_SYMBOLS)}\n"
         f"🟢 KuCoin:  {len(KUCOIN_SYMBOLS)}\n\n"
-        f"📈 By Guardex Quant LABs | 5m Timeframe\n"
+        f"📈 By Guardex Quant LABs |      5m Timeframe\n"
         f"✅ Confirmation: 0.1% | Cooldown: {COOLDOWN_MIN}min"
     )
     log.info(f"✅ البوت يعمل — {total} عملة على 5 منصات")
