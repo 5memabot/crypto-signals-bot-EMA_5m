@@ -173,7 +173,7 @@ MEXC_SYMBOLS = [
     "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
     "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
     "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
-    "ATHUSDT",     "ARCUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
+    "ATHUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
     "XPRUSDT",     "OMGUSDT",
 ]
 
@@ -193,7 +193,7 @@ GATE_SYMBOLS = [
     "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
     "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
     "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
-    "POWRUSDT",
+    "POWRUSDT",    "ARCUSDT",
 ]
 
 KUCOIN_SYMBOLS = [
@@ -710,7 +710,7 @@ def main():
         f"🟣 Bybit:   {len(BYBIT_SYMBOLS)}\n"
         f"🔵 Gate:    {len(GATE_SYMBOLS)}\n"
         f"🟢 KuCoin:  {len(KUCOIN_SYMBOLS)}\n\n"
-        f"📈 By Guardex Quant LABs |      5m Timeframe\n"
+        f"📈 By Guardex Quant LABs |           5m Timeframe\n"
         f"✅ Confirmation: 0.1% | Cooldown: {COOLDOWN_MIN}min"
     )
     log.info(f"✅ البوت يعمل — {total} عملة على 5 منصات")
