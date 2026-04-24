@@ -28,8 +28,8 @@ HEADERS = {
 
 EMA_FAST        = 11
 EMA_SLOW        = 26
-CONFIRM_MIN_PCT = 0.001
-WAIT_CANDLES    = 1
+CONFIRM_MIN_PCT = 0.0025
+WAIT_CANDLES    = 2
 MAX_CHECKS      = 30
 SELL_WAIT_MIN   = 5
 BUY_EXPIRY_HRS  = 24
@@ -169,40 +169,35 @@ BINANCE_SYMBOLS = [
 ]
 
 MEXC_SYMBOLS = [
-    "XCNUSDT",     "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
-    "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
-    "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
-    "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
-    "ATHUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",     "XPRUSDT",
-    "OMGUSDT",
+    "XCNUSDT",      "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
+    "PLAYUSDT",     "STABLEUSDT",  "COAIUSDT",    "CROSSUSDT",   "GRASSUSDT",   
+    "GRIFFAINUSDT", "HUSDT",       "KGENUSDT",    "ABUSDT",      "ATHUSDT",         
+    "A8USDT",       "ALUUSDT",     "XPRUSDT",
+    
 ]
 
 BYBIT_SYMBOLS = [
-    "UXLINKUSDT",  "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PAALUSDT",
-    "L3USDT",      "ALCHUSDT",    "ZIGUSDT",     "MONUSDT",     "CSPRUSDT",
-    "INSPUSDT",    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",
-    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",     "GALAUSDT",
-    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",     "TNSRUSDT",
-    "KAIAUSDT",    "PYTHUSDT",    "AIXBTUSDT",   "BLURUSDT",    "ZKUSDT",
-    "JASMYUSDT",   "PARTIUSDT",   "THETAUSDT",   "BICOUSDT",    "POLUSDT",
+    "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PARTIUSDT",  "THETAUSDT",
+    "ALCHUSDT",    "MONUSDT",     "GALAUSDT",    "POLUSDT",    "BLURUSDT",
+    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",    "AIXBTUSDT",
+    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",    "PYTHUSDT", 
+    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",    "KAIAUSDT",
+                           
 ]
 
 GATE_SYMBOLS = [
-    "AKTUSDT",     "RADUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",
-    "IDUSDT",      "MTLUSDT",     "BANDUSDT",    "ICXUSDT",     "STGUSDT",
-    "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
-    "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
-    "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
-    "POWRUSDT",    
+    "AKTUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",   "XTZUSDT",
+    "IDUSDT",      "MTLUSDT",     "VANAUSDT",    "MIRAUSDT",   "LAUSDT",
+    "PROVEUSDT",   "STXUSDT",     "POWRUSDT",    "BEAMUSDT",   "LPTUSDT",
+                                     
 ]
 
 KUCOIN_SYMBOLS = [
-    "AIOZUSDT",    "DUSKUSDT",    "IOTXUSDT",    "MANTAUSDT",   "NIGHTUSDT",
+    "AIOZUSDT",    "IOTXUSDT",    "NIGHTUSDT",   "ARCUSDT",     "VETUSDT",
     "CELRUSDT",    "ANKRUSDT",    "ENSUSDT",     "API3USDT",    "WUSDT",
-    "MANAUSDT",    "CELOUSDT",    "EIGENUSDT",   "GASUSDT",     "ENJUSDT",
-    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "ACTUSDT",     "CHZUSDT",
-    "DEXEUSDT",    "HNTUSDT",     "FLUXUSDT",    "PORTALUSDT",  "EDUUSDT",
-    "IOSTUSDT",    "VETUSDT",     "ARCUSDT",
+    "CELOUSDT",    "EIGENUSDT",   "ENJUSDT",     "HNTUSDT",     "DEXEUSDT",
+    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "CHZUSDT",
+                               
 ]
 
 SYMBOL_MAP = {}
