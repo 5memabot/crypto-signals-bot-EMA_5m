@@ -28,12 +28,12 @@ HEADERS = {
 
 EMA_FAST        = 11
 EMA_SLOW        = 26
-CONFIRM_MIN_PCT = 0.0025
-WAIT_CANDLES    = 2
+CONFIRM_MIN_PCT = 0.005   # 0.5%
+WAIT_MINUTES    = 8       # ← تغيير: 8 دقائق بعد الكروس
 MAX_CHECKS      = 30
-SELL_WAIT_MIN   = 5
+SELL_WAIT_MIN   = 20      # ← تغيير: من 90 إلى 20 دقيقة
 BUY_EXPIRY_HRS  = 24
-COOLDOWN_MIN    = 30
+COOLDOWN_MIN    = 75      # ← تغيير: من 240 إلى 75 دقيقة
 
 REQUEST_DELAY = {
     "Binance" : 0.15,
@@ -76,10 +76,12 @@ def retry_get(session, url, params, retries=3, timeout=5):
             log.warning(f"⚠️  retry {attempt+1}: {e}")
     return None
 
+# ← تغيير: كل دوال الجلب تستخدم interval="15m"
+
 def get_closes_binance(symbol, limit=152):
     try:
         r = retry_get(SESSION_BINANCE, "https://api.binance.com/api/v3/klines",
-                      {"symbol": symbol, "interval": "5m", "limit": limit})
+                      {"symbol": symbol, "interval": "15m", "limit": limit})  # ← 15m
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -93,7 +95,7 @@ def get_closes_binance(symbol, limit=152):
 def get_closes_mexc(symbol, limit=152):
     try:
         r = retry_get(SESSION_MEXC, "https://api.mexc.com/api/v3/klines",
-                      {"symbol": symbol, "interval": "5m", "limit": limit})
+                      {"symbol": symbol, "interval": "15m", "limit": limit})  # ← 15m
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -107,7 +109,7 @@ def get_closes_mexc(symbol, limit=152):
 def get_closes_bybit(symbol, limit=152):
     try:
         r = retry_get(SESSION_BYBIT, "https://api.bybit.com/v5/market/kline",
-                      {"symbol": symbol, "interval": "5", "limit": limit, "category": "spot"})
+                      {"symbol": symbol, "interval": "15", "limit": limit, "category": "spot"})  # ← 15
         if r is None: return None
         data = r.json()
         if data.get("retCode") == 0:
@@ -125,7 +127,7 @@ def get_closes_gate(symbol, limit=152):
     try:
         pair = symbol.replace("USDT", "_USDT")
         r = retry_get(SESSION_GATE, "https://api.gateio.ws/api/v4/spot/candlesticks",
-                      {"currency_pair": pair, "interval": "5m", "limit": limit})
+                      {"currency_pair": pair, "interval": "15m", "limit": limit})  # ← 15m
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -140,7 +142,7 @@ def get_closes_kucoin(symbol, limit=152):
     try:
         pair = symbol.replace("USDT", "-USDT")
         r = retry_get(SESSION_KUCOIN, "https://api.kucoin.com/api/v1/market/candles",
-                      {"symbol": pair, "type": "5min"})
+                      {"symbol": pair, "type": "15min"})  # ← 15min
         if r is None: return None
         data = r.json()
         if data.get("code") == "200000" and data.get("data"):
@@ -169,35 +171,40 @@ BINANCE_SYMBOLS = [
 ]
 
 MEXC_SYMBOLS = [
-    "XCNUSDT",      "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
-    "PLAYUSDT",     "STABLEUSDT",  "COAIUSDT",    "CROSSUSDT",   "GRASSUSDT",   
-    "GRIFFAINUSDT", "HUSDT",       "KGENUSDT",    "ABUSDT",      "ATHUSDT",         
-    "A8USDT",       "ALUUSDT",     "XPRUSDT",
-    
+    "XCNUSDT",     "COREUSDT",    "PIUSDT",      "XDCUSDT",     "RIOUSDT",
+    "PLAYUSDT",    "STABLEUSDT",  "BLESSUSDT",   "COAIUSDT",    "CROSSUSDT",
+    "FHEUSDT",     "GRASSUSDT",   "GRIFFAINUSDT","HUSDT",       "LIGHTUSDT",
+    "ALEOUSDT",    "PINUSDT",     "PORT3USDT",   "KGENUSDT",    "ABUSDT",
+    "ATHUSDT",     "AIOUSDT",     "A8USDT",      "ALUUSDT",
+    "XPRUSDT",     "OMGUSDT",
 ]
 
 BYBIT_SYMBOLS = [
-    "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PARTIUSDT",  "THETAUSDT",
-    "ALCHUSDT",    "MONUSDT",     "GALAUSDT",    "POLUSDT",    "BLURUSDT",
-    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",    "AIXBTUSDT",
-    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",    "PYTHUSDT", 
-    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",    "KAIAUSDT",
-                           
+    "UXLINKUSDT",  "KASUSDT",     "MNTUSDT",     "FLOCKUSDT",   "PAALUSDT",
+    "L3USDT",      "ALCHUSDT",    "ZIGUSDT",     "MONUSDT",     "CSPRUSDT",
+    "INSPUSDT",    "MOVEUSDT",    "COOKIEUSDT",  "LRCUSDT",     "ZROUSDT",
+    "MOVRUSDT",    "TONUSDT",     "FETUSDT",     "SUIUSDT",     "GALAUSDT",
+    "TAOUSDT",     "QNTUSDT",     "SANDUSDT",    "ETCUSDT",     "TNSRUSDT",
+    "KAIAUSDT",    "PYTHUSDT",    "AIXBTUSDT",   "BLURUSDT",    "ZKUSDT",
+    "JASMYUSDT",   "PARTIUSDT",   "THETAUSDT",   "BICOUSDT",    "POLUSDT",
 ]
 
 GATE_SYMBOLS = [
-    "AKTUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",   "XTZUSDT",
-    "IDUSDT",      "MTLUSDT",     "VANAUSDT",    "MIRAUSDT",   "LAUSDT",
-    "PROVEUSDT",   "STXUSDT",     "POWRUSDT",    "BEAMUSDT",   "LPTUSDT",
-                                     
+    "AKTUSDT",     "RADUSDT",     "ALTUSDT",     "BATUSDT",     "MINAUSDT",
+    "IDUSDT",      "MTLUSDT",     "BANDUSDT",    "ICXUSDT",     "STGUSDT",
+    "PROVEUSDT",   "STXUSDT",     "SKLUSDT",     "GLMUSDT",     "XTZUSDT",
+    "IQUSDT",      "HOTUSDT",     "LAUSDT",      "RLCUSDT",     "VANAUSDT",
+    "BEAMUSDT",    "PONDUSDT",    "LPTUSDT",     "MIRAUSDT",    "GUSDT",
+    "POWRUSDT",    "ARCUSDT",
 ]
 
 KUCOIN_SYMBOLS = [
-    "AIOZUSDT",    "IOTXUSDT",    "NIGHTUSDT",   "ARCUSDT",     "VETUSDT",
+    "AIOZUSDT",    "DUSKUSDT",    "IOTXUSDT",    "MANTAUSDT",   "NIGHTUSDT",
     "CELRUSDT",    "ANKRUSDT",    "ENSUSDT",     "API3USDT",    "WUSDT",
-    "CELOUSDT",    "EIGENUSDT",   "ENJUSDT",     "HNTUSDT",     "DEXEUSDT",
-    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "CHZUSDT",
-                               
+    "MANAUSDT",    "CELOUSDT",    "EIGENUSDT",   "GASUSDT",     "ENJUSDT",
+    "GMTUSDT",     "IOUSDT",      "KAITOUSDT",   "ACTUSDT",     "CHZUSDT",
+    "DEXEUSDT",    "HNTUSDT",     "FLUXUSDT",    "PORTALUSDT",  "EDUUSDT",
+    "IOSTUSDT",    "VETUSDT",
 ]
 
 SYMBOL_MAP = {}
@@ -292,10 +299,6 @@ def send_message_to_user(user_id, text, reply_to=None):
     return None
 
 def broadcast_message(text, reply_to_map=None):
-    """
-    يرسل لكل المستخدمين النشطين.
-    reply_to_map: dict { user_id: message_id } للرد على رسائل BUY
-    """
     users = get_active_users()
     result_map = {}
     for user_id in users:
@@ -309,7 +312,6 @@ def broadcast_message(text, reply_to_map=None):
     return result_map
 
 def send_message(text, reply_to=None, pin=False):
-    """إرسال للـ CHAT_ID الرئيسي (للتقارير والإشعارات)"""
     url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     if reply_to:
@@ -319,7 +321,6 @@ def send_message(text, reply_to=None, pin=False):
         res = r.json()
         if res.get("ok"):
             msg_id = res["result"]["message_id"]
-            # تثبيت رسالة التقرير اليومي لتبقى للأبد
             if pin:
                 requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/pinChatMessage",
@@ -367,7 +368,7 @@ def can_signal(symbol):
 def cleanup_cooldown():
     with state_lock:
         for sym in list(cooldown):
-            if datetime.now() - cooldown[sym] > timedelta(hours=2):
+            if datetime.now() - cooldown[sym] > timedelta(hours=12):
                 del cooldown[sym]
 
 # ═══════════════════════════════════════════════════
@@ -396,7 +397,6 @@ def send_daily_report():
         daily_results.clear()
 
     total      = len(results)
-    # صفقة ناجحة = ATH > 0
     win_ath    = {s: v for s, v in results.items() if v["peak_pct"] > 0}
     lose_ath   = {s: v for s, v in results.items() if v["peak_pct"] <= 0}
     wins_close = {s: v for s, v in results.items() if v["pct"] >= 0}
@@ -434,8 +434,6 @@ def send_daily_report():
     msg += " By Guardex Quant LABs "
     msg += "🔥The Founder : Azad Smaeel Abdullah"
 
-
-    # إرسال مع تثبيت للـ admin + broadcast للمستخدمين
     send_message(msg, pin=True)
     broadcast_message(msg)
     log.info("📊 تم إرسال التقرير اليومي")
@@ -443,7 +441,6 @@ def send_daily_report():
 # ═══════════════════════════════════════════════════
 # المنطق الرئيسي
 # ═══════════════════════════════════════════════════
-
 def check_symbol(symbol, exchange, fetch_func):
     now = datetime.now()
 
@@ -479,7 +476,6 @@ def check_symbol(symbol, exchange, fetch_func):
                     peak_pct  = (peak_price  - buy_price) / buy_price * 100
 
                     if close_pct >= 0:
-                        # ربح — ATH + CLOSE
                         sell_msg = (
                             f"<b>{pair}</b>\n"
                             f"SELL NOW ❌\n"
@@ -487,7 +483,6 @@ def check_symbol(symbol, exchange, fetch_func):
                             f"CLOSE: {fmt_price(close_price)} (<b><u>+{close_pct:.1f}%</u></b>)"
                         )
                     else:
-                        # خسارة — CLOSE + ATH
                         sell_msg = (
                             f"<b>{pair}</b>\n"
                             f"SELL NOW ❌🐹\n"
@@ -497,7 +492,6 @@ def check_symbol(symbol, exchange, fetch_func):
                 else:
                     sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
 
-                # إرسال كـ reply لكل مستخدم على رسالة BUY الخاصة به
                 broadcast_message(sell_msg, reply_to_map=reply_map)
                 log.info(f"🔴 SELL: {symbol}")
 
@@ -560,8 +554,9 @@ def check_symbol(symbol, exchange, fetch_func):
     if not in_pending:
         return
 
-    elapsed = int((now - entry["cross_time"]).total_seconds() / 300)
-    if elapsed < WAIT_CANDLES:
+    # ← تغيير: انتظار 8 دقائق على الأقل بعد الكروس
+    elapsed_minutes = (now - entry["cross_time"]).total_seconds() / 60
+    if elapsed_minutes < WAIT_MINUTES:
         return
 
     with state_lock:
@@ -584,7 +579,7 @@ def check_symbol(symbol, exchange, fetch_func):
         return
 
     pct = (price - entry["cross_price"]) / entry["cross_price"]
-    if pct >= CONFIRM_MIN_PCT:
+    if pct >= CONFIRM_MIN_PCT:  # ← 0.5% أو أكثر
         pair = fmt_symbol(symbol)
         msg  = (
             f"👇💱👾🔥💥🚀🌕💯💯\n\n"
@@ -595,7 +590,6 @@ def check_symbol(symbol, exchange, fetch_func):
             f"⚠️ گەلەک تەماع نەبە _ و فایدێ خو وەربگرە.\n\n"
             f"💸💵💴💰💹💲💱👾"
         )
-        # broadcast وتخزين reply_map لكل مستخدم
         reply_map = broadcast_message(msg)
         log.info(f"✅ BUY: {symbol} @ {fmt_price(price)} (+{pct*100:.2f}%) [{exchange}]")
 
@@ -604,7 +598,7 @@ def check_symbol(symbol, exchange, fetch_func):
                 "buy_price" : price,
                 "buy_time"  : now,
                 "peak_price": price,
-                "reply_map" : reply_map,  # { user_id: message_id }
+                "reply_map" : reply_map,
             }
             cooldown[symbol] = now
             pending_buy.pop(symbol, None)
@@ -679,14 +673,14 @@ def handle_updates():
             time.sleep(5)
 
 # ═══════════════════════════════════════════════════
-# Candle Alignment
+# Candle Alignment — ← تغيير: محاذاة لإغلاق شمعة 15 دقيقة
 # ═══════════════════════════════════════════════════
 
 def wait_for_candle_close():
     now  = datetime.utcnow()
-    secs = (now.minute % 5) * 60 + now.second
-    wait = (300 - secs) + 5
-    log.info(f"⏳ انتظار {wait:.0f} ثانية حتى إغلاق الشمعة...")
+    secs = (now.minute % 15) * 60 + now.second  # ← ثواني مضت من بداية شمعة 15 دقيقة
+    wait = (900 - secs) + 5                      # ← انتظار حتى إغلاق شمعة 15 دقيقة + 5 ثواني هامش
+    log.info(f"⏳ انتظار {wait:.0f} ثانية حتى إغلاق شمعة 15 دقيقة...")
     time.sleep(wait)
 
 # ═══════════════════════════════════════════════════
@@ -705,8 +699,8 @@ def main():
         f"🟣 Bybit:   {len(BYBIT_SYMBOLS)}\n"
         f"🔵 Gate:    {len(GATE_SYMBOLS)}\n"
         f"🟢 KuCoin:  {len(KUCOIN_SYMBOLS)}\n\n"
-        f"📈 By Guardex Quant LABs |           5m Timeframe\n"
-        f"✅ Confirmation: 0.1% | Cooldown: {COOLDOWN_MIN}min"
+        f"📈 By Guardex Quant LABs |           15M Timeframe\n"
+        f"✅ Confirmation: 0.5% after 8min | Cooldown: {COOLDOWN_MIN}min"
     )
     log.info(f"✅ البوت يعمل — {total} عملة على 5 منصات")
 
