@@ -29,17 +29,18 @@ HEADERS = {
 
 EMA_FAST        = 11
 EMA_SLOW        = 26
-CONFIRM_MIN_PCT = 0.003   # 0.3%
+EMA_SELL_FAST   = 5    # ← EMA سريعة للـ SELL
+EMA_SELL_SLOW   = 13   # ← EMA بطيئة للـ SELL
+CONFIRM_MIN_PCT = 0.003
 WAIT_MINUTES    = 8
 MAX_CHECKS      = 30
-SELL_WAIT_MIN   = 15
 BUY_EXPIRY_HRS  = 24
 COOLDOWN_MIN    = 75
 
 # ─── ZRTI parameters ───────────────────────────────
-ZRTI_DELTA        = 0.3
-ZRTI_SELL_THRESH  = 70    # ZRTI > 70 → تشبع
-ZRTI_Z_SELL       = 0.5   # z > +0.5 → فوق المتوسط
+ZRTI_DELTA       = 0.3
+ZRTI_SELL_THRESH = 70
+ZRTI_Z_SELL      = 0.5
 # ───────────────────────────────────────────────────
 
 REQUEST_DELAY = {
@@ -223,26 +224,35 @@ ALL_SYMBOLS = list(SYMBOL_MAP.keys())
 
 pending_buy  = {}
 active_buy   = {}
-pending_sell = {}
 cooldown     = {}
 state_lock   = Lock()
+
+# ═══════════════════════════════════════════════════
+# EMA
+# ═══════════════════════════════════════════════════
+
+def calc_ema_series(closes, period):
+    if len(closes) < period + 1:
+        return None, None
+    k   = 2 / (period + 1)
+    ema = sum(closes[:period]) / period
+    prev = ema
+    for price in closes[period:]:
+        prev = ema
+        ema  = price * k + ema * (1 - k)
+    return ema, prev
 
 # ═══════════════════════════════════════════════════
 # ZRTI — Zebari Reversal Tension Index
 # ═══════════════════════════════════════════════════
 
-def compute_zrti(closes: list) -> tuple[float, float]:
-    """
-    يحسب ZRTI وz-score من قائمة أسعار الإغلاق.
-    يعيد (zrti, z) أو (0.0, 0.0) عند الفشل.
-    """
+def compute_zrti(closes: list) -> tuple:
     if len(closes) < 55:
         return 0.0, 0.0
     try:
         eps = 1e-10
         arr = np.array(closes, dtype=float)
 
-        # M_δ : استنزاف الزخم
         dP      = arr - np.roll(arr, 1)
         dP[0]   = 0.0
         dP_prev = np.roll(dP, 1)
@@ -256,13 +266,10 @@ def compute_zrti(closes: list) -> tuple[float, float]:
         ratio = np.clip(np.abs(dP) / (np.abs(dP_prev) + eps), 0, 10)
         M     = np.clip(1 - ratio * np.exp(-ZRTI_DELTA * streak), 0, 1)
 
-        # E_λ : طاقة الحجم الكامنة (نستخدم تقريباً من السعر إذ لا volume هنا)
-        # نستخدم تذبذب السعر كبديل عن الحجم
         vol_proxy = np.abs(dP)
         vol_ma    = np.convolve(vol_proxy, np.ones(20)/20, mode='same')
         E         = np.clip(vol_proxy / (vol_ma + eps), 0, 5) / 5.0
 
-        # Φ_σ : الانحراف الإحصائي
         mu    = np.convolve(arr, np.ones(50)/50, mode='same')
         diff  = arr - mu
         sigma = np.array([np.std(arr[max(0,i-50):i+1]) for i in range(len(arr))])
@@ -278,19 +285,47 @@ def compute_zrti(closes: list) -> tuple[float, float]:
         if np.isnan(z_val)    or np.isinf(z_val):    z_val    = 0.0
 
         return zrti_val, z_val
-
     except Exception as e:
         log.debug(f"ZRTI compute error: {e}")
         return 0.0, 0.0
 
 
-def zrti_is_sell(closes: list) -> bool:
+# ═══════════════════════════════════════════════════
+# SELL Signal: EMA 5/13 crossover + ZRTI تأكيد
+# ═══════════════════════════════════════════════════
+
+def check_sell_signal(closes: list) -> bool:
     """
-    True إذا كان ZRTI يشير إلى تشبع بيعي:
-    ZRTI > ZRTI_SELL_THRESH  و  z > +ZRTI_Z_SELL
+    شرط SELL المزدوج:
+    1. EMA 5 تقاطعت للأسفل تحت EMA 13  (bearish crossover)
+    2. ZRTI > 70  و  z > +0.5           (تشبع بيعي مؤكد)
+    كلا الشرطين مطلوبان معاً — بدون أي انتظار زمني.
     """
+    if len(closes) < 60:
+        return False
+
+    # ── شرط 1: EMA 5/13 bearish crossover ──────────
+    ema5_now,  ema5_prev  = calc_ema_series(closes, EMA_SELL_FAST)
+    ema13_now, ema13_prev = calc_ema_series(closes, EMA_SELL_SLOW)
+
+    if any(v is None for v in [ema5_now, ema5_prev, ema13_now, ema13_prev]):
+        return False
+
+    # EMA5 كانت فوق EMA13 ثم تقاطعت للأسفل
+    ema_bearish = (ema5_prev >= ema13_prev) and (ema5_now < ema13_now)
+
+    if not ema_bearish:
+        return False
+
+    # ── شرط 2: ZRTI تأكيد التشبع البيعي ────────────
     zrti, z = compute_zrti(closes)
-    return zrti > ZRTI_SELL_THRESH and z > ZRTI_Z_SELL
+    zrti_confirm = (zrti > ZRTI_SELL_THRESH) and (z > ZRTI_Z_SELL)
+
+    if not zrti_confirm:
+        return False
+
+    log.debug(f"SELL confirmed: EMA5={ema5_now:.6f} < EMA13={ema13_now:.6f} | ZRTI={zrti:.1f} z={z:+.2f}")
+    return True
 
 
 # ═══════════════════════════════════════════════════
@@ -404,19 +439,8 @@ def send_message(text, reply_to=None, pin=False):
     return None
 
 # ═══════════════════════════════════════════════════
-# EMA + تنسيق
+# تنسيق
 # ═══════════════════════════════════════════════════
-
-def calc_ema_series(closes, period):
-    if len(closes) < period + 1:
-        return None, None
-    k    = 2 / (period + 1)
-    ema  = sum(closes[:period]) / period
-    prev = ema
-    for price in closes[period:]:
-        prev = ema
-        ema  = price * k + ema * (1 - k)
-    return ema, prev
 
 def fmt_symbol(symbol):
     if symbol.endswith("USDT"):
@@ -467,11 +491,10 @@ def send_daily_report():
         results = dict(daily_results)
         daily_results.clear()
 
-    total      = len(results)
-    win_ath    = {s: v for s, v in results.items() if v["peak_pct"] > 0}
-    wins_close = {s: v for s, v in results.items() if v["pct"] >= 0}
-    loses_close= {s: v for s, v in results.items() if v["pct"] < 0}
-
+    total       = len(results)
+    win_ath     = {s: v for s, v in results.items() if v["peak_pct"] > 0}
+    wins_close  = {s: v for s, v in results.items() if v["pct"] >= 0}
+    loses_close = {s: v for s, v in results.items() if v["pct"] < 0}
     success_pct = int(len(win_ath) / total * 100) if total > 0 else 0
 
     msg = "💲ئەنجامێ 24 دەمژمێرێن چوی یێن کوینا ل قازانج و خساربونێ دا.💱⚡👾💯💯\n\n"
@@ -515,67 +538,13 @@ def send_daily_report():
 def check_symbol(symbol, exchange, fetch_func):
     now = datetime.now()
 
-    # تنظيف BUY المنتهية
+    # تنظيف BUY المنتهية (24 ساعة)
     with state_lock:
         if symbol in active_buy:
             if now - active_buy[symbol]["buy_time"] > timedelta(hours=BUY_EXPIRY_HRS):
                 log.info(f"🗑️  {symbol} حُذف (24h)")
                 del active_buy[symbol]
-                pending_sell.pop(symbol, None)
                 return
-
-    # ─── SELL معلق — تحقق بـ ZRTI بدلاً من EMA ──────────────────
-    with state_lock:
-        in_sell  = symbol in pending_sell
-        sell_age = (now - pending_sell[symbol]["sell_time"]).total_seconds() / 60 if in_sell else 0
-
-    if in_sell and sell_age >= SELL_WAIT_MIN:
-        closes = fetch_func(symbol)
-        if closes and len(closes) >= 55:
-
-            # ← التغيير الرئيسي: استخدام ZRTI بدلاً من EMA للبيع
-            if zrti_is_sell(closes):
-                with state_lock:
-                    pair        = fmt_symbol(symbol)
-                    buy_price   = active_buy.get(symbol, {}).get("buy_price", 0)
-                    peak_price  = active_buy.get(symbol, {}).get("peak_price", 0)
-                    reply_map   = active_buy.get(symbol, {}).get("reply_map", {})
-                    close_price = closes[-1]
-
-                if buy_price > 0 and close_price > 0:
-                    close_pct = (close_price - buy_price) / buy_price * 100
-                    peak_pct  = (peak_price  - buy_price) / buy_price * 100
-
-                    if close_pct >= 0:
-                        sell_msg = (
-                            f"<b>{pair}</b>\n"
-                            f"SELL NOW ❌\n"
-                            f"ATH: {fmt_price(peak_price)} (<b><u>+{peak_pct:.1f}%</u></b>) __ "
-                            f"CLOSE: {fmt_price(close_price)} (<b><u>+{close_pct:.1f}%</u></b>)"
-                        )
-                    else:
-                        sell_msg = (
-                            f"<b>{pair}</b>\n"
-                            f"SELL NOW ❌🐹\n"
-                            f"CLOSE: {fmt_price(close_price)} (<b><u>{close_pct:.1f}%</u></b>) __ "
-                            f"ATH: {fmt_price(peak_price)} (<b><u>+{peak_pct:.1f}%</u></b>)"
-                        )
-                else:
-                    sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
-
-                broadcast_message(sell_msg, reply_to_map=reply_map)
-                zrti_val, z_val = compute_zrti(closes)
-                log.info(f"🔴 SELL (ZRTI): {symbol} | ZRTI={zrti_val:.1f} z={z_val:+.2f}")
-
-                if buy_price > 0 and close_price > 0:
-                    record_sell_result(symbol, pair, buy_price, close_price, peak_price)
-
-                with state_lock:
-                    pending_sell.pop(symbol, None)
-                    active_buy.pop(symbol, None)
-            # ← إذا لم يصدر ZRTI إشارة بيع بعد، ابقَ في الانتظار (لا تفعل شيئاً)
-        return
-    # ─────────────────────────────────────────────────────────────
 
     # جلب البيانات
     closes = fetch_func(symbol)
@@ -590,31 +559,66 @@ def check_symbol(symbol, exchange, fetch_func):
             if price > active_buy[symbol].get("peak_price", 0):
                 active_buy[symbol]["peak_price"] = price
 
+    # ═══════════════════════════════════════════════
+    # SELL: EMA 5/13 كروس + ZRTI تأكيد — فوري بلا انتظار
+    # ═══════════════════════════════════════════════
+    with state_lock:
+        in_active = symbol in active_buy
+
+    if in_active:
+        if check_sell_signal(closes):
+            with state_lock:
+                pair        = fmt_symbol(symbol)
+                buy_price   = active_buy[symbol].get("buy_price", 0)
+                peak_price  = active_buy[symbol].get("peak_price", 0)
+                reply_map   = active_buy[symbol].get("reply_map", {})
+                close_price = closes[-1]
+
+            if buy_price > 0 and close_price > 0:
+                close_pct = (close_price - buy_price) / buy_price * 100
+                peak_pct  = (peak_price  - buy_price) / buy_price * 100
+
+                if close_pct >= 0:
+                    sell_msg = (
+                        f"<b>{pair}</b>\n"
+                        f"SELL NOW ❌\n"
+                        f"ATH: {fmt_price(peak_price)} (<b><u>+{peak_pct:.1f}%</u></b>) __ "
+                        f"CLOSE: {fmt_price(close_price)} (<b><u>+{close_pct:.1f}%</u></b>)"
+                    )
+                else:
+                    sell_msg = (
+                        f"<b>{pair}</b>\n"
+                        f"SELL NOW ❌🐹\n"
+                        f"CLOSE: {fmt_price(close_price)} (<b><u>{close_pct:.1f}%</u></b>) __ "
+                        f"ATH: {fmt_price(peak_price)} (<b><u>+{peak_pct:.1f}%</u></b>)"
+                    )
+            else:
+                sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
+
+            broadcast_message(sell_msg, reply_to_map=reply_map)
+
+            zrti_val, z_val = compute_zrti(closes)
+            log.info(f"🔴 SELL: {symbol} | EMA5/13 cross + ZRTI={zrti_val:.1f} z={z_val:+.2f}")
+
+            if buy_price > 0 and close_price > 0:
+                record_sell_result(symbol, pair, buy_price, close_price, peak_price)
+
+            with state_lock:
+                active_buy.pop(symbol, None)
+
+        return  # العملة نشطة — لا تبحث عن BUY
+
+    # ═══════════════════════════════════════════════
+    # BUY: EMA 11/26 crossover (لم يتغير)
+    # ═══════════════════════════════════════════════
     ema11_now, ema11_prev = calc_ema_series(closes, EMA_FAST)
     ema26_now, ema26_prev = calc_ema_series(closes, EMA_SLOW)
 
     if any(v is None for v in [ema11_now, ema11_prev, ema26_now, ema26_prev]):
         return
 
-    # BUY: EMA crossover (لم يتغير)
-    bullish = (ema11_prev <= ema26_prev) and (ema11_now > ema26_now) and (ema26_now > emu26_prev if False else ema26_now > ema26_prev)
+    bullish = (ema11_prev <= ema26_prev) and (ema11_now > ema26_now) and (ema26_now > ema26_prev)
 
-    # ← التغيير: كشف بداية الـ SELL pending يعتمد الآن على ZRTI مباشرة
-    # إذا العملة نشطة ولا يوجد sell معلق → تحقق بـ ZRTI
-    with state_lock:
-        in_active = symbol in active_buy
-        in_sell2  = symbol in pending_sell
-
-    if in_active and not in_sell2:
-        if len(closes) >= 55 and zrti_is_sell(closes):
-            with state_lock:
-                pending_sell[symbol] = {"sell_time": now}
-                pending_buy.pop(symbol, None)
-            zrti_val, z_val = compute_zrti(closes)
-            log.info(f"⏳ SELL كروس ZRTI: {symbol} | ZRTI={zrti_val:.1f} z={z_val:+.2f} — انتظار {SELL_WAIT_MIN} دقائق")
-            return
-
-    # BUY pending logic (لم يتغير)
     with state_lock:
         already_pending = symbol in pending_buy
         already_active  = symbol in active_buy
@@ -650,7 +654,7 @@ def check_symbol(symbol, exchange, fetch_func):
             pending_buy.pop(symbol, None)
         return
 
-    if ema11_now is not None and ema26_now is not None and ema11_now < ema26_now:
+    if ema11_now < ema26_now:
         log.info(f"↩️  كروس عكسي: {symbol}")
         with state_lock:
             pending_buy.pop(symbol, None)
@@ -716,7 +720,6 @@ def handle_user_message(user_id, text):
         return
 
     code_data = get_code_from_db(text)
-
     if not code_data:
         send_message_to_user(user_id, "❌ كود غير صحيح")
         return
@@ -778,7 +781,8 @@ def main():
         f"🔵 Gate:    {len(GATE_SYMBOLS)}\n"
         f"🟢 KuCoin:  {len(KUCOIN_SYMBOLS)}\n\n"
         f"📈 By Guardex Quant LABs | 15M Timeframe\n"
-        f"✅ BUY: EMA Cross | SELL: ZRTI &gt; {ZRTI_SELL_THRESH} (z &gt; +{ZRTI_Z_SELL})\n"
+        f"✅ BUY: EMA 11/26 Cross\n"
+        f"🔴 SELL: EMA 5/13 Cross + ZRTI &gt; {ZRTI_SELL_THRESH} (z &gt; +{ZRTI_Z_SELL})\n"
         f"⏱ Cooldown: {COOLDOWN_MIN}min"
     )
     log.info(f"✅ البوت يعمل — {total} عملة على 5 منصات")
@@ -790,7 +794,7 @@ def main():
         log.info(f"{'═'*55}")
         log.info(f"🔍 دورة #{cycle} | {ts} | {total} عملة")
         with state_lock:
-            log.info(f"⏳pending={len(pending_buy)} | ✅active={len(active_buy)} | 🔴sell={len(pending_sell)}")
+            log.info(f"⏳pending={len(pending_buy)} | ✅active={len(active_buy)}")
 
         wait_for_candle_close()
         scan_all()
