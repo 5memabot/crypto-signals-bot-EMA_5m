@@ -1,6 +1,7 @@
 import requests
 import time
 import logging
+import numpy as np
 from datetime import datetime, timedelta
 from threading import Thread, Lock
 
@@ -28,12 +29,18 @@ HEADERS = {
 
 EMA_FAST        = 11
 EMA_SLOW        = 26
-CONFIRM_MIN_PCT = 0.005   # 0.5%
-WAIT_MINUTES    = 8       # ← تغيير: 8 دقائق بعد الكروس
+CONFIRM_MIN_PCT = 0.003   # 0.3%
+WAIT_MINUTES    = 8
 MAX_CHECKS      = 30
-SELL_WAIT_MIN   = 20      # ← تغيير: من 90 إلى 20 دقيقة
+SELL_WAIT_MIN   = 15
 BUY_EXPIRY_HRS  = 24
-COOLDOWN_MIN    = 75      # ← تغيير: من 240 إلى 75 دقيقة
+COOLDOWN_MIN    = 75
+
+# ─── ZRTI parameters ───────────────────────────────
+ZRTI_DELTA        = 0.3
+ZRTI_SELL_THRESH  = 70    # ZRTI > 70 → تشبع
+ZRTI_Z_SELL       = 0.5   # z > +0.5 → فوق المتوسط
+# ───────────────────────────────────────────────────
 
 REQUEST_DELAY = {
     "Binance" : 0.15,
@@ -76,12 +83,10 @@ def retry_get(session, url, params, retries=3, timeout=5):
             log.warning(f"⚠️  retry {attempt+1}: {e}")
     return None
 
-# ← تغيير: كل دوال الجلب تستخدم interval="15m"
-
 def get_closes_binance(symbol, limit=152):
     try:
         r = retry_get(SESSION_BINANCE, "https://api.binance.com/api/v3/klines",
-                      {"symbol": symbol, "interval": "15m", "limit": limit})  # ← 15m
+                      {"symbol": symbol, "interval": "15m", "limit": limit})
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -95,7 +100,7 @@ def get_closes_binance(symbol, limit=152):
 def get_closes_mexc(symbol, limit=152):
     try:
         r = retry_get(SESSION_MEXC, "https://api.mexc.com/api/v3/klines",
-                      {"symbol": symbol, "interval": "15m", "limit": limit})  # ← 15m
+                      {"symbol": symbol, "interval": "15m", "limit": limit})
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -109,7 +114,7 @@ def get_closes_mexc(symbol, limit=152):
 def get_closes_bybit(symbol, limit=152):
     try:
         r = retry_get(SESSION_BYBIT, "https://api.bybit.com/v5/market/kline",
-                      {"symbol": symbol, "interval": "15", "limit": limit, "category": "spot"})  # ← 15
+                      {"symbol": symbol, "interval": "15", "limit": limit, "category": "spot"})
         if r is None: return None
         data = r.json()
         if data.get("retCode") == 0:
@@ -127,7 +132,7 @@ def get_closes_gate(symbol, limit=152):
     try:
         pair = symbol.replace("USDT", "_USDT")
         r = retry_get(SESSION_GATE, "https://api.gateio.ws/api/v4/spot/candlesticks",
-                      {"currency_pair": pair, "interval": "15m", "limit": limit})  # ← 15m
+                      {"currency_pair": pair, "interval": "15m", "limit": limit})
         if r is None: return None
         data = r.json()
         if isinstance(data, list) and len(data) >= EMA_SLOW + 5:
@@ -142,7 +147,7 @@ def get_closes_kucoin(symbol, limit=152):
     try:
         pair = symbol.replace("USDT", "-USDT")
         r = retry_get(SESSION_KUCOIN, "https://api.kucoin.com/api/v1/market/candles",
-                      {"symbol": pair, "type": "15min"})  # ← 15min
+                      {"symbol": pair, "type": "15min"})
         if r is None: return None
         data = r.json()
         if data.get("code") == "200000" and data.get("data"):
@@ -221,6 +226,72 @@ active_buy   = {}
 pending_sell = {}
 cooldown     = {}
 state_lock   = Lock()
+
+# ═══════════════════════════════════════════════════
+# ZRTI — Zebari Reversal Tension Index
+# ═══════════════════════════════════════════════════
+
+def compute_zrti(closes: list) -> tuple[float, float]:
+    """
+    يحسب ZRTI وz-score من قائمة أسعار الإغلاق.
+    يعيد (zrti, z) أو (0.0, 0.0) عند الفشل.
+    """
+    if len(closes) < 55:
+        return 0.0, 0.0
+    try:
+        eps = 1e-10
+        arr = np.array(closes, dtype=float)
+
+        # M_δ : استنزاف الزخم
+        dP      = arr - np.roll(arr, 1)
+        dP[0]   = 0.0
+        dP_prev = np.roll(dP, 1)
+        dP_prev[0] = dP[1] if len(dP) > 1 else 0.0
+
+        streak = np.ones(len(arr), dtype=float)
+        for i in range(1, len(arr)):
+            if np.sign(dP[i]) == np.sign(dP[i - 1]):
+                streak[i] = streak[i - 1] + 1
+
+        ratio = np.clip(np.abs(dP) / (np.abs(dP_prev) + eps), 0, 10)
+        M     = np.clip(1 - ratio * np.exp(-ZRTI_DELTA * streak), 0, 1)
+
+        # E_λ : طاقة الحجم الكامنة (نستخدم تقريباً من السعر إذ لا volume هنا)
+        # نستخدم تذبذب السعر كبديل عن الحجم
+        vol_proxy = np.abs(dP)
+        vol_ma    = np.convolve(vol_proxy, np.ones(20)/20, mode='same')
+        E         = np.clip(vol_proxy / (vol_ma + eps), 0, 5) / 5.0
+
+        # Φ_σ : الانحراف الإحصائي
+        mu    = np.convolve(arr, np.ones(50)/50, mode='same')
+        diff  = arr - mu
+        sigma = np.array([np.std(arr[max(0,i-50):i+1]) for i in range(len(arr))])
+        z_arr = diff / (sigma + eps)
+        Phi   = np.clip(z_arr ** 2, 0, 9) / 9.0
+
+        zrti_arr = (0.35 * M + 0.25 * E + 0.40 * Phi) * 100
+
+        zrti_val = float(zrti_arr[-1])
+        z_val    = float(z_arr[-1])
+
+        if np.isnan(zrti_val) or np.isinf(zrti_val): zrti_val = 0.0
+        if np.isnan(z_val)    or np.isinf(z_val):    z_val    = 0.0
+
+        return zrti_val, z_val
+
+    except Exception as e:
+        log.debug(f"ZRTI compute error: {e}")
+        return 0.0, 0.0
+
+
+def zrti_is_sell(closes: list) -> bool:
+    """
+    True إذا كان ZRTI يشير إلى تشبع بيعي:
+    ZRTI > ZRTI_SELL_THRESH  و  z > +ZRTI_Z_SELL
+    """
+    zrti, z = compute_zrti(closes)
+    return zrti > ZRTI_SELL_THRESH and z > ZRTI_Z_SELL
+
 
 # ═══════════════════════════════════════════════════
 # Supabase
@@ -398,7 +469,6 @@ def send_daily_report():
 
     total      = len(results)
     win_ath    = {s: v for s, v in results.items() if v["peak_pct"] > 0}
-    lose_ath   = {s: v for s, v in results.items() if v["peak_pct"] <= 0}
     wins_close = {s: v for s, v in results.items() if v["pct"] >= 0}
     loses_close= {s: v for s, v in results.items() if v["pct"] < 0}
 
@@ -441,6 +511,7 @@ def send_daily_report():
 # ═══════════════════════════════════════════════════
 # المنطق الرئيسي
 # ═══════════════════════════════════════════════════
+
 def check_symbol(symbol, exchange, fetch_func):
     now = datetime.now()
 
@@ -453,17 +524,17 @@ def check_symbol(symbol, exchange, fetch_func):
                 pending_sell.pop(symbol, None)
                 return
 
-    # SELL معلق
+    # ─── SELL معلق — تحقق بـ ZRTI بدلاً من EMA ──────────────────
     with state_lock:
         in_sell  = symbol in pending_sell
         sell_age = (now - pending_sell[symbol]["sell_time"]).total_seconds() / 60 if in_sell else 0
 
     if in_sell and sell_age >= SELL_WAIT_MIN:
         closes = fetch_func(symbol)
-        if closes and len(closes) >= EMA_SLOW + 2:
-            ema11, _ = calc_ema_series(closes, EMA_FAST)
-            ema26, _ = calc_ema_series(closes, EMA_SLOW)
-            if ema11 is not None and ema26 is not None and ema11 < ema26:
+        if closes and len(closes) >= 55:
+
+            # ← التغيير الرئيسي: استخدام ZRTI بدلاً من EMA للبيع
+            if zrti_is_sell(closes):
                 with state_lock:
                     pair        = fmt_symbol(symbol)
                     buy_price   = active_buy.get(symbol, {}).get("buy_price", 0)
@@ -493,15 +564,18 @@ def check_symbol(symbol, exchange, fetch_func):
                     sell_msg = f"<b>{pair}</b>\nSELL NOW ❌"
 
                 broadcast_message(sell_msg, reply_to_map=reply_map)
-                log.info(f"🔴 SELL: {symbol}")
+                zrti_val, z_val = compute_zrti(closes)
+                log.info(f"🔴 SELL (ZRTI): {symbol} | ZRTI={zrti_val:.1f} z={z_val:+.2f}")
 
                 if buy_price > 0 and close_price > 0:
                     record_sell_result(symbol, pair, buy_price, close_price, peak_price)
 
-        with state_lock:
-            pending_sell.pop(symbol, None)
-            active_buy.pop(symbol, None)
+                with state_lock:
+                    pending_sell.pop(symbol, None)
+                    active_buy.pop(symbol, None)
+            # ← إذا لم يصدر ZRTI إشارة بيع بعد، ابقَ في الانتظار (لا تفعل شيئاً)
         return
+    # ─────────────────────────────────────────────────────────────
 
     # جلب البيانات
     closes = fetch_func(symbol)
@@ -522,9 +596,25 @@ def check_symbol(symbol, exchange, fetch_func):
     if any(v is None for v in [ema11_now, ema11_prev, ema26_now, ema26_prev]):
         return
 
-    bullish = (ema11_prev <= ema26_prev) and (ema11_now > ema26_now) and (ema26_now > ema26_prev)
-    bearish = (ema11_prev >= ema26_prev) and (ema11_now < ema26_now)
+    # BUY: EMA crossover (لم يتغير)
+    bullish = (ema11_prev <= ema26_prev) and (ema11_now > ema26_now) and (ema26_now > emu26_prev if False else ema26_now > ema26_prev)
 
+    # ← التغيير: كشف بداية الـ SELL pending يعتمد الآن على ZRTI مباشرة
+    # إذا العملة نشطة ولا يوجد sell معلق → تحقق بـ ZRTI
+    with state_lock:
+        in_active = symbol in active_buy
+        in_sell2  = symbol in pending_sell
+
+    if in_active and not in_sell2:
+        if len(closes) >= 55 and zrti_is_sell(closes):
+            with state_lock:
+                pending_sell[symbol] = {"sell_time": now}
+                pending_buy.pop(symbol, None)
+            zrti_val, z_val = compute_zrti(closes)
+            log.info(f"⏳ SELL كروس ZRTI: {symbol} | ZRTI={zrti_val:.1f} z={z_val:+.2f} — انتظار {SELL_WAIT_MIN} دقائق")
+            return
+
+    # BUY pending logic (لم يتغير)
     with state_lock:
         already_pending = symbol in pending_buy
         already_active  = symbol in active_buy
@@ -537,24 +627,12 @@ def check_symbol(symbol, exchange, fetch_func):
         return
 
     with state_lock:
-        in_active = symbol in active_buy
-        in_sell2  = symbol in pending_sell
-
-    if bearish and in_active and not in_sell2:
-        with state_lock:
-            pending_sell[symbol] = {"sell_time": now}
-            pending_buy.pop(symbol, None)
-        log.info(f"⏳ SELL كروس: {symbol} — انتظار {SELL_WAIT_MIN} دقائق")
-        return
-
-    with state_lock:
         in_pending = symbol in pending_buy
         entry      = dict(pending_buy[symbol]) if in_pending else None
 
     if not in_pending:
         return
 
-    # ← تغيير: انتظار 8 دقائق على الأقل بعد الكروس
     elapsed_minutes = (now - entry["cross_time"]).total_seconds() / 60
     if elapsed_minutes < WAIT_MINUTES:
         return
@@ -579,7 +657,7 @@ def check_symbol(symbol, exchange, fetch_func):
         return
 
     pct = (price - entry["cross_price"]) / entry["cross_price"]
-    if pct >= CONFIRM_MIN_PCT:  # ← 0.5% أو أكثر
+    if pct >= CONFIRM_MIN_PCT:
         pair = fmt_symbol(symbol)
         msg  = (
             f"👇💱👾🔥💥🚀🌕💯💯\n\n"
@@ -673,13 +751,13 @@ def handle_updates():
             time.sleep(5)
 
 # ═══════════════════════════════════════════════════
-# Candle Alignment — ← تغيير: محاذاة لإغلاق شمعة 15 دقيقة
+# Candle Alignment
 # ═══════════════════════════════════════════════════
 
 def wait_for_candle_close():
     now  = datetime.utcnow()
-    secs = (now.minute % 15) * 60 + now.second  # ← ثواني مضت من بداية شمعة 15 دقيقة
-    wait = (900 - secs) + 5                      # ← انتظار حتى إغلاق شمعة 15 دقيقة + 5 ثواني هامش
+    secs = (now.minute % 15) * 60 + now.second
+    wait = (900 - secs) + 5
     log.info(f"⏳ انتظار {wait:.0f} ثانية حتى إغلاق شمعة 15 دقيقة...")
     time.sleep(wait)
 
@@ -699,8 +777,9 @@ def main():
         f"🟣 Bybit:   {len(BYBIT_SYMBOLS)}\n"
         f"🔵 Gate:    {len(GATE_SYMBOLS)}\n"
         f"🟢 KuCoin:  {len(KUCOIN_SYMBOLS)}\n\n"
-        f"📈 By Guardex Quant LABs |           15M Timeframe\n"
-        f"✅ Confirmation: 0.5% after 8min | Cooldown: {COOLDOWN_MIN}min"
+        f"📈 By Guardex Quant LABs | 15M Timeframe\n"
+        f"✅ BUY: EMA Cross | SELL: ZRTI &gt; {ZRTI_SELL_THRESH} (z &gt; +{ZRTI_Z_SELL})\n"
+        f"⏱ Cooldown: {COOLDOWN_MIN}min"
     )
     log.info(f"✅ البوت يعمل — {total} عملة على 5 منصات")
 
